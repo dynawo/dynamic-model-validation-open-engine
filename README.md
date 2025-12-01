@@ -25,6 +25,7 @@ likely erroneous.
 - [Reference paper](#reference-paper)
 - [Requirements](#requirements)
 - [Installation](#installation)
+- [Settings](#settings)
 - [How to use](#how-to-use)
 - [Getting started](#getting-started)
 
@@ -107,6 +108,11 @@ This zip file must contain:
 * The input files for Dynawo (job file and associated files) 
 * A file named *measured_data.csv* that contains the P and Q
 values measured by the PMU.
+
+## Settings
+
+The file `resources/settings.yaml` needs to be updated with the path
+to your dynawo exe file.
 
 ## How to use
 

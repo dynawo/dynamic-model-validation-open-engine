@@ -352,7 +352,7 @@ def create_dynawo_tab():
                 st.session_state["base_case_simulation_data_df"] = base_case_simulation_data_df
                 st.session_state["base_case_correlation_dict"] = base_case_correlation_dict
                 st.session_state["log_area_base_case_content"] = get_streamlit_logs(streamlit_logger_base_case)
-            except DynawoFailedException:  # Verifier si ça marche bien, avec par exemple un exe /home/clementrem/workspace/dynawo-rte/myEnvDynawoRTE.sh
+            except DynawoFailedException:
                 if "base_case_simulation_data_df" in st.session_state:
                     del st.session_state["base_case_simulation_data_df"]
                 if "base_case_correlation_dict" in st.session_state:
