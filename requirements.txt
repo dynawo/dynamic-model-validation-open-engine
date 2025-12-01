@@ -1,0 +1,7 @@
+streamlit>=1.40.1
+plotly
+numpy
+pandas
+scipy
+pyyaml
+streamlit-keyup
