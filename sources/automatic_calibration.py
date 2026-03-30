@@ -18,6 +18,8 @@ and the output of the Dynawo compputation.
 from util_functions import sample_df, rmse, get_col_name_p_q
 from scipy.optimize import minimize
 from scipy.optimize import differential_evolution
+import PyNomad
+import numpy as np
 from dynawo_functions import run_dynawo, modify_multiple_param_par_file_for_optim, \
     DynawoFailedException, get_simulation_data
 from enum import Enum
@@ -26,6 +28,7 @@ from enum import Enum
 class OptimMethod(Enum):
     DIFFERENTIAL_EVOLUTION = "differential_evolution"
     NELDER_MEAD = "nelder_mead"
+    NOMAD = "Nomad"
 
 
 def objective_func(
@@ -189,6 +192,104 @@ def differential_evolution_calibration(
     return calibrated_simulation_data_df
 
 
+def nomad_calibration(
+            dynawo_launcher,
+            jobs_file,
+            par_file,
+            selected_sets,
+            measured_p,
+            measured_q,
+            streamlit_logger,
+            max_bb_eval=100
+        ):
+    # TODO - NOMAD can handle discrete and boolean variables
+    discrete_variables_allowed = False
+    x0, bounds, index_to_param_map = prepare_x0(
+        selected_sets,
+        discrete_variables_allowed,
+        streamlit_logger
+    )
+
+    x0 = np.asarray(x0, dtype=float)
+    n = x0.size
+
+    # Bounds - NOMAD needs 2 lists
+    lower_bounds = [b[0] for b in bounds]
+    upper_bounds = [b[1] for b in bounds]
+
+    errors = []
+
+    # Blackbox NOMAD : appelée à chaque évaluation de f
+    def nomad_bb(x_eval):
+        try:
+            x = np.array([x_eval.get_coord(i) for i in range(n)], dtype=float)
+
+            f = objective_func(
+                x,
+                index_to_param_map,
+                dynawo_launcher,
+                jobs_file,
+                par_file,
+                measured_p,
+                measured_q
+            )
+
+            error = float(f)
+            errors.append(error)
+
+            if streamlit_logger is not None:
+                iteration_num = len(errors)  # nb d'évaluations
+                streamlit_logger.info(f"--- Evaluation {iteration_num} - rmse: {round(error, 4)}")
+                log_param_values(x, index_to_param_map, streamlit_logger)
+                streamlit_logger.info("")
+
+            raw_bbo = f"{f}"
+            x_eval.setBBO(raw_bbo.encode("UTF-8"))
+
+        except Exception:
+            print("Unexpected eval error in NOMAD blackbox", sys.exc_info()[0])
+            return 0  # evaluation failed
+
+        return 1  # evaluation succeeded
+
+    # Building NOMAD param
+    # X0 seems redundant since we provide x0 to PyNomad.optimize,
+    # but it is consistent with the official templates
+    params = [
+        f"DIMENSION {n}",
+        "BB_OUTPUT_TYPE OBJ",
+        "X0 ( " + " ".join(str(v) for v in x0.tolist()) + " )",
+        "LOWER_BOUND ( " + " ".join(str(v) for v in lower_bounds) + " )",
+        "UPPER_BOUND ( " + " ".join(str(v) for v in upper_bounds) + " )",
+        f"MAX_BB_EVAL {max_bb_eval}",
+        # minimal display
+        "DISPLAY_DEGREE 0",
+        "DISPLAY_ALL_EVAL false",
+        "DISPLAY_STATS BBE OBJ"
+    ]
+
+    result = PyNomad.optimize(nomad_bb, x0.tolist(), [], [], params)
+    x_calibrated = np.array(result["x_best"], dtype=float)
+
+    # Now that the best set of parametrs has been identifified,
+    # We re-run a last simulation to get the good calibrated_simulation_data_df
+    final_error = objective_func(
+        x_calibrated,
+        index_to_param_map,
+        dynawo_launcher,
+        jobs_file,
+        par_file,
+        measured_p,
+        measured_q
+    )
+
+    if streamlit_logger is not None:
+        log_final_param_values(x_calibrated, x0, index_to_param_map, streamlit_logger)
+
+    calibrated_simulation_data_df = get_simulation_data(jobs_file)
+    return calibrated_simulation_data_df
+
+
 def run_parameter_calibration(
         dynawo_launcher,
         jobs_file,
@@ -218,8 +319,18 @@ def run_parameter_calibration(
             sampled_measured_q,
             streamlit_logger
         )
-    else:
+    elif optim_method == OptimMethod.NELDER_MEAD:
         calibrated_simulation_data_df = nelder_mead_calibration(
+            dynawo_launcher,
+            jobs_file,
+            par_file,
+            selected_sets,
+            sampled_measured_p,
+            sampled_measured_q,
+            streamlit_logger
+        )
+    else:
+        calibrated_simulation_data_df = nomad_calibration(
             dynawo_launcher,
             jobs_file,
             par_file,

@@ -65,6 +65,7 @@ class TestNomad(unittest.TestCase):
             "UPPER_BOUND ( 10 10 1 5 )",  # upper bounds
             "BB_OUTPUT_TYPE OBJ EB EB",  # OBJ => objective function, EB ("EXTREME BARRIER" = hard constraint) => constraint, EB ("EXTREME BARRIER")
             "MAX_BB_EVAL 200",
+            "MAX_TIME 3600",  # Timeout after 1 hour
             "DISPLAY_DEGREE 0",  # 0 => No log at the console
             "DISPLAY_ALL_EVAL false"  # Additional logs, we dont want them in the test
         ]
