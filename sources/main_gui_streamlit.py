@@ -692,7 +692,9 @@ def create_param_calibration_tab():
             with st.expander("Optimization parameters (advanced)"):
                 optim_method = st.radio(
                     "Select optimization method",
-                    [OptimMethod.NELDER_MEAD.value, OptimMethod.DIFFERENTIAL_EVOLUTION.value],
+                    [OptimMethod.NELDER_MEAD.value,
+                     OptimMethod.DIFFERENTIAL_EVOLUTION.value,
+                     OptimMethod.NOMAD.value],
                     index=0
                 )
                 optim_method = OptimMethod(optim_method)
