@@ -3,3 +3,6 @@ __pycache__
 .idea
 temp
 .ipynb_checkpoints/
+test_cases/**
+!test_cases/test_case_1
+!test_cases/test_case_2

@@ -32,11 +32,5 @@ class Settings:
         params = [f"{key}={getattr(self, key)}" for key in self._config]
         return f"Settings({', '.join(params)})"
 
-    def get_description(self, key):
-        if key in self._config and 'description' in self._config[key]:
-            return self._config[key]['description']
-        else:
-            raise KeyError(f"No description available for parameter '{key}'")
-
     def get_dynawo_launcher(self):
         return self.dynawo_launcher
