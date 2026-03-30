@@ -27,9 +27,13 @@ def get_measured_data(csv_path):
     measured_data_df.set_index("time", inplace=True)
     measured_data_df = remove_rows_with_same_index(measured_data_df)
     col_name_p = [col for col in measured_data_df.columns
-                  if col.endswith("PGenPu") or col.endswith("PGenNomPu")][0]
+                  if col.endswith("PGenPu")
+                  or col.endswith("PGenNomPu")
+                  or col.endswith("P2_value")][0]
     col_name_q = [col for col in measured_data_df.columns
-                  if col.endswith("QGenPu") or col.endswith("QGenNomPu")][0]
+                  if col.endswith("QGenPu")
+                  or col.endswith("QGenNomPu")
+                  or col.endswith("Q2_value")][0]
     st.session_state["col_name_p"] = col_name_p
     st.session_state["col_name_q"] = col_name_q
     measured_data_df[col_name_p] = pd.to_numeric(measured_data_df[col_name_p], errors='coerce')
@@ -70,6 +74,8 @@ def sample_df(df, start_time=None, end_time=None, sampling_frequency=100):
 
     timestep = 1 / sampling_frequency
     sampled_time_indices = np.linspace(start_time, end_time, num=int(np.round((end_time - start_time) / timestep)) + 1)
+    sampled_time_indices = np.round(sampled_time_indices, 10)
+
     sampled_df = pd.DataFrame(index=sampled_time_indices, columns=df.columns)
     for sampled_time_index in sampled_time_indices:
         if sampled_time_index in df.index:
