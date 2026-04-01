@@ -59,28 +59,58 @@ def prepare_x0(
     bounds = []
     index_to_param_map = dict()
     i = 0
+
     for set_id in selected_sets:
         for parameter_id in selected_sets[set_id]:
             parameter = selected_sets[set_id][parameter_id]
             param_name = parameter.get_name()
             param_type = parameter.get_type()
-            if param_type == "DOUBLE":
-                param_value = float(parameter.get_value())
+
+            if param_type != "DOUBLE":
                 if streamlit_logger is not None:
-                    streamlit_logger.info(set_id + "/" + param_name + " - " + "included amongst the variables to calibrate")
-                    streamlit_logger.info("Reference value: " + str(round(param_value, 4))
-                                          + ", min bound: " + str(round(parameter.get_min_bound(), 4))
-                                          + ", max bound: " + str(round(parameter.get_max_bound(), 4)))
-            else:
-                if streamlit_logger is not None:
-                    streamlit_logger.error(set_id + "/" + param_name + " - " + "Skipped")
+                    streamlit_logger.error(f"{set_id}/{param_name} - Skipped (type {param_type} not supported)")
                 continue
+
+            param_value = float(parameter.get_value())
+            min_bound = float(parameter.get_min_bound())
+            max_bound = float(parameter.get_max_bound())
+            original_value = param_value
+
+            if param_value < min_bound:
+                param_value = min_bound
+                if streamlit_logger is not None:
+                    streamlit_logger.warning(
+                        f"{set_id}/{param_name} - Reference value {round(original_value, 4)} "
+                        f"below lower bound {round(min_bound, 4)}. "
+                        f"Initial value set to {round(param_value, 4)}."
+                    )
+            elif param_value > max_bound:
+                param_value = max_bound
+                if streamlit_logger is not None:
+                    streamlit_logger.warning(
+                        f"{set_id}/{param_name} - Reference value {round(original_value, 4)} "
+                        f"above upper bound {round(max_bound, 4)}. "
+                        f"Initial value set to {round(param_value, 4)}."
+                    )
+
+            if streamlit_logger is not None:
+                streamlit_logger.info(
+                    f"{set_id}/{param_name} - included amongst the variables to calibrate"
+                )
+                streamlit_logger.info(
+                    "Initial value used: " + str(round(param_value, 4))
+                    + ", min bound: " + str(round(min_bound, 4))
+                    + ", max bound: " + str(round(max_bound, 4))
+                )
+
             x0.append(param_value)
-            bounds.append((parameter.get_min_bound(), parameter.get_max_bound()))
+            bounds.append((min_bound, max_bound))
             index_to_param_map[i] = (set_id, param_name)
-            i = i + 1
+            i += 1
+
     if streamlit_logger is not None:
         streamlit_logger.info("")
+
     return x0, bounds, index_to_param_map
 
 
@@ -219,7 +249,6 @@ def nomad_calibration(
 
     errors = []
 
-    # Blackbox NOMAD : appelée à chaque évaluation de f
     def nomad_bb(x_eval):
         try:
             x = np.array([x_eval.get_coord(i) for i in range(n)], dtype=float)
