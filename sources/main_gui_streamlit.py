@@ -689,15 +689,54 @@ def create_param_calibration_tab():
         with col_2:
             st.write("")  # for spacing
         with col_3:
-            with st.expander("Optimization parameters (advanced)"):
+            with st.expander("Optimization parameters (advanced)", expanded=True):
                 optim_method = st.radio(
                     "Select optimization method",
-                    [OptimMethod.NELDER_MEAD.value,
-                     OptimMethod.DIFFERENTIAL_EVOLUTION.value,
-                     OptimMethod.NOMAD.value],
+                    [OptimMethod.NOMAD.value,
+                     OptimMethod.NELDER_MEAD.value,
+                     OptimMethod.DIFFERENTIAL_EVOLUTION.value
+                     ],
                     index=0
                 )
                 optim_method = OptimMethod(optim_method)
+
+                optim_params = {}
+
+                if optim_method == OptimMethod.NOMAD:
+                    raw_nomad_max_iterations = st_keyup(
+                        "Max blackbox iterations",
+                        value=50,
+                        key="nomad_max_iterations"
+                    )
+                    raw_timeout_seconds = st_keyup(
+                        "Timeout (secondes)",
+                        value=600,
+                        key="timeout_seconds"
+                    )
+                    try:
+                        nomad_max_iterations = max(1, int(raw_nomad_max_iterations))
+                    except (TypeError, ValueError):
+                        nomad_max_iterations = 50
+                    try:
+                        timeout_seconds = max(1, int(raw_timeout_seconds))
+                    except (TypeError, ValueError):
+                        timeout_seconds = 600
+
+                    optim_params["max_bb_eval"] = nomad_max_iterations
+                    optim_params["timeout_seconds"] = timeout_seconds
+
+                elif optim_method == OptimMethod.NELDER_MEAD:
+                    nm_max_iterations = st_keyup(
+                        "Max iterations",
+                        value=50,
+                        key="nm_max_iterations"
+                    )
+                    try:
+                        nm_max_iterations = max(1, int(nm_max_iterations))
+                    except (TypeError, ValueError):
+                        nm_max_iterations = 100
+                    finally:
+                        optim_params["nm_max_iterations"] = nm_max_iterations
 
             def on_click():
                 streamlit_logger_calibration = initialize_streamlit_logger(
@@ -737,7 +776,8 @@ def create_param_calibration_tab():
                             sampled_measured_q,
                             base_case_rmse,
                             optim_method,
-                            streamlit_logger=streamlit_logger_calibration
+                            streamlit_logger=streamlit_logger_calibration,
+                            **optim_params
                         )
 
                         sampled_measured_data_df = st.session_state["sampled_measured_data_df"]

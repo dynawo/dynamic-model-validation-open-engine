@@ -28,9 +28,9 @@ SUPER_HIGH_VALUE_ERROR = 9999
 
 
 class OptimMethod(Enum):
-    DIFFERENTIAL_EVOLUTION = "differential_evolution"
-    NELDER_MEAD = "nelder_mead"
     NOMAD = "Nomad"
+    NELDER_MEAD = "Nelder mead"
+    DIFFERENTIAL_EVOLUTION = "Differential evolution"
 
 
 def objective_func(
@@ -137,7 +137,8 @@ def nelder_mead_calibration(
             selected_sets,
             measured_p,
             measured_q,
-            streamlit_logger=None
+            streamlit_logger,
+            nm_max_iterations
         ):
     """
     Fast - can't handle discrete variables - good at finding a solution close to the starting value
@@ -165,7 +166,7 @@ def nelder_mead_calibration(
         bounds=bounds,
         method="Nelder-Mead",
         callback=callback,
-        options={"maxiter": 100}
+        options={"maxiter": nm_max_iterations}
     )
 
     x_calibrated = opt_result.x
@@ -244,7 +245,8 @@ def nomad_calibration(
             measured_p,
             measured_q,
             streamlit_logger,
-            max_bb_eval=50
+            max_bb_eval,
+            timeout_seconds
         ):
     # TODO - NOMAD can handle discrete and boolean variables
     discrete_variables_allowed = False
@@ -308,7 +310,8 @@ def nomad_calibration(
         # minimal display
         "DISPLAY_DEGREE 0",
         "DISPLAY_ALL_EVAL false",
-        "DISPLAY_STATS BBE OBJ"
+        "DISPLAY_STATS BBE OBJ",
+        f"MAX_TIME {timeout_seconds}"
     ]
 
     result = PyNomad.optimize(nomad_bb, x0.tolist(), [], [], params)
@@ -327,6 +330,8 @@ def nomad_calibration(
     )
 
     if streamlit_logger is not None:
+        streamlit_logger.info(result["stop_reason"])
+
         if final_error >= SUPER_HIGH_VALUE_ERROR:
             streamlit_logger.warning(
                 "All the Dynawo simulations failed during the calibration."
@@ -334,7 +339,6 @@ def nomad_calibration(
             )
         else:
             log_final_param_values(x_calibrated, x0, index_to_param_map, streamlit_logger)
-
 
     calibrated_simulation_data_df = get_simulation_data(jobs_file)
     return calibrated_simulation_data_df
@@ -349,7 +353,8 @@ def run_parameter_calibration(
         sampled_measured_q,
         base_case_rmse,
         optim_method: OptimMethod,
-        streamlit_logger=None
+        streamlit_logger=None,
+        **optim_params
 ):
     # TODO : add button to stop optimization ?
     if streamlit_logger is not None:
@@ -370,6 +375,8 @@ def run_parameter_calibration(
             streamlit_logger
         )
     elif optim_method == OptimMethod.NELDER_MEAD:
+        nm_max_iterations_default = 100
+        nm_max_iterations = optim_params.get("nm_max_iterations", nm_max_iterations_default)
         calibrated_simulation_data_df = nelder_mead_calibration(
             dynawo_launcher,
             jobs_file,
@@ -377,9 +384,14 @@ def run_parameter_calibration(
             selected_sets,
             sampled_measured_p,
             sampled_measured_q,
-            streamlit_logger
+            streamlit_logger,
+            nm_max_iterations
         )
     else:
+        max_bb_eval_default = 100
+        max_bb_eval = optim_params.get("max_bb_eval", max_bb_eval_default)
+        timeout_seconds_default = 600  # 10 minutes
+        timeout_seconds = optim_params.get("timeout_seconds", timeout_seconds_default)
         calibrated_simulation_data_df = nomad_calibration(
             dynawo_launcher,
             jobs_file,
@@ -387,7 +399,9 @@ def run_parameter_calibration(
             selected_sets,
             sampled_measured_p,
             sampled_measured_q,
-            streamlit_logger
+            streamlit_logger,
+            max_bb_eval,
+            timeout_seconds
         )
 
     if streamlit_logger is not None:
