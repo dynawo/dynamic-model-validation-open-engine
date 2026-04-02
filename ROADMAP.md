@@ -19,3 +19,4 @@ with binary variables, and for float variables to per-unit the epsilon.
 takes too much time.
 * Revisit the call to dynawo, for instance using pypowsybl.
 * take advantage of parallel computing?
+* Enable the possibility to have multi-experience parameter calibration.
