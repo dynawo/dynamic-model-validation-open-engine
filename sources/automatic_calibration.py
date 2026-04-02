@@ -24,6 +24,8 @@ from dynawo_functions import run_dynawo, modify_multiple_param_par_file_for_opti
     DynawoFailedException, get_simulation_data
 from enum import Enum
 
+SUPER_HIGH_VALUE_ERROR = 9999
+
 
 class OptimMethod(Enum):
     DIFFERENTIAL_EVOLUTION = "differential_evolution"
@@ -46,7 +48,6 @@ def objective_func(
         error = rmse(sampled_measured_p, sampled_measured_q, sampled_simulated_p, sampled_simulated_q)
         return error
     except DynawoFailedException:
-        SUPER_HIGH_VALUE_ERROR = 9999
         return SUPER_HIGH_VALUE_ERROR
 
 
@@ -169,7 +170,13 @@ def nelder_mead_calibration(
 
     x_calibrated = opt_result.x
     if streamlit_logger is not None:
-        log_final_param_values(x_calibrated, x0, index_to_param_map, streamlit_logger)
+        if opt_result.fun >= SUPER_HIGH_VALUE_ERROR:
+            streamlit_logger.warning(
+                "All the Dynawo simulations failed during the calibration."
+                "The results cannot be exploited."
+            )
+        else:
+            log_final_param_values(x_calibrated, x0, index_to_param_map, streamlit_logger)
 
     calibrated_simulation_data_df = get_simulation_data(jobs_file)
     return calibrated_simulation_data_df
@@ -216,7 +223,14 @@ def differential_evolution_calibration(
 
     x_calibrated = opt_result.x
     if streamlit_logger is not None:
-        log_final_param_values(x_calibrated, x0, index_to_param_map, streamlit_logger)
+        if opt_result.fun >= SUPER_HIGH_VALUE_ERROR:
+            streamlit_logger.warning(
+                "All the Dynawo simulations failed during the calibration."
+                "The results cannot be exploited."
+            )
+        else:
+            log_final_param_values(x_calibrated, x0, index_to_param_map, streamlit_logger)
+
 
     calibrated_simulation_data_df = get_simulation_data(jobs_file)
     return calibrated_simulation_data_df
@@ -230,7 +244,7 @@ def nomad_calibration(
             measured_p,
             measured_q,
             streamlit_logger,
-            max_bb_eval=100
+            max_bb_eval=50
         ):
     # TODO - NOMAD can handle discrete and boolean variables
     discrete_variables_allowed = False
@@ -313,7 +327,14 @@ def nomad_calibration(
     )
 
     if streamlit_logger is not None:
-        log_final_param_values(x_calibrated, x0, index_to_param_map, streamlit_logger)
+        if final_error >= SUPER_HIGH_VALUE_ERROR:
+            streamlit_logger.warning(
+                "All the Dynawo simulations failed during the calibration."
+                "The results cannot be exploited."
+            )
+        else:
+            log_final_param_values(x_calibrated, x0, index_to_param_map, streamlit_logger)
+
 
     calibrated_simulation_data_df = get_simulation_data(jobs_file)
     return calibrated_simulation_data_df
