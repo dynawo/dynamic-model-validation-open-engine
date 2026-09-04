@@ -72,11 +72,32 @@ class TestNomad(unittest.TestCase):
 
         result = PyNomad.optimize(TestNomad.dummy_blackbox_function, x_0, [], [], params)
 
-        self.assertAlmostEqual(result["x_best"][0], 6, places=6)
-        self.assertAlmostEqual(result["x_best"][1], 2, places=6)
-        self.assertAlmostEqual(result["x_best"][2], 1, places=6)
-        self.assertAlmostEqual(result["x_best"][3], 3, places=6)
-        self.assertAlmostEqual(result["f_best"], 10.16, places=6)
+        # Best solution
+        # (Compatibility issue between Nomad 4.5.1 et Nomad 4.6.0+)
+        if "x_best_feas" in result and result["x_best_feas"]:
+            x_best = result["x_best_feas"][0]
+        elif "x_single_best" in result:
+            x_best = result["x_single_best"]
+        elif "x_best" in result:
+            x_best = result["x_best"]
+        else:
+            raise ValueError("Impossible to retrieve the best solution from the Nomad output.")
+
+        # Value of the objective function
+        # (Compatibility issue between Nomad 4.5.1 et Nomad 4.6.0+)
+        if "f_best" in result:
+            f_best = result["f_best"]
+        elif "f_single_best" in result:
+            f_best = result["f_single_best"]
+        else:
+            raise ValueError("Impossible to retrieve the value of the objective function from the Nomad output.")
+
+            # Vérification des résultats
+        self.assertAlmostEqual(x_best[0], 6, places=6)
+        self.assertAlmostEqual(x_best[1], 2, places=6)
+        self.assertAlmostEqual(x_best[2], 1, places=6)
+        self.assertAlmostEqual(x_best[3], 3, places=6)
+        self.assertAlmostEqual(f_best, 10.16, places=6)
 
 
 if __name__ == "__main__":

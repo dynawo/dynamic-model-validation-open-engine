@@ -315,9 +315,19 @@ def nomad_calibration(
     ]
 
     result = PyNomad.optimize(nomad_bb, x0.tolist(), [], [], params)
-    x_calibrated = np.array(result["x_best"], dtype=float)
 
-    # Now that the best set of parametrs has been identifified,
+    # Best solution
+    # (Compatibility issue between Nomad 4.5.1 et Nomad 4.6.0+)
+    if "x_best_feas" in result and result["x_best_feas"]:
+        x_calibrated = result["x_best_feas"][0]
+    elif "x_single_best" in result:
+        x_calibrated = result["x_single_best"]
+    elif "x_best" in result:
+        x_calibrated = result["x_best"]
+    else:
+        raise ValueError("Impossible to retrieve the best solution from the Nomad output.")
+    
+    # Now that the best set of parameters has been identifified,
     # We re-run a last simulation to get the good calibrated_simulation_data_df
     final_error = objective_func(
         x_calibrated,
