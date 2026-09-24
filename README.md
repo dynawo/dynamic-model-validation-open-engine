@@ -101,7 +101,7 @@ pip install --upgrade pip
 Install the necessary libraries:
 
 ```bash
-(venv) pip install -r requirements.txt
+pip install -r requirements.txt
 ```
 
 ## Input data
