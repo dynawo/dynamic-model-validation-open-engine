@@ -12,9 +12,10 @@
 # Dynawo Model Validation Toolbox
 
 This Python toolbox is designed to compare the output 
-of Dynawo simulations with PMU measurements. 
+of Dynawo simulations with reference values, either from PMU measurements, 
+or from an EMT simulation. 
 In case of abnormal differences, a dedicated module 
-helps identify the model parameters that are most 
+helps identify and calibrate the model parameters that are most 
 likely erroneous.
 
 ## Table of Contents
@@ -25,6 +26,7 @@ likely erroneous.
 - [Reference paper](#reference-paper)
 - [Requirements](#requirements)
 - [Installation](#installation)
+- [Input data](#input-data)
 - [Settings](#settings)
 - [How to use](#how-to-use)
 - [Getting started](#getting-started)
@@ -49,14 +51,14 @@ The toolbox in this project enables users to:
 
 ## Contributors
 
-This code has been developped by [Washington State University](https://school.eecs.wsu.edu/)
+This code has been developed by [Washington State University](https://school.eecs.wsu.edu/)
 and [RTE](https://www.rte-france.com/) (French Transmission System Operator).
  
 The main contributors are listed in *AUTHORS.md*.
 
 ## License
 
-This project and is licensed under the terms of the 
+This project is licensed under the terms of the 
 [Mozilla Public License V2.0](http://mozilla.org/MPL/2.0). 
 See [LICENSE](LICENSE.txt) for more information.
 
@@ -73,7 +75,8 @@ doi: 10.1109/NAPS58826.2023.10318793.
 
 ## Requirements
 
-* Python >= 3.8.10
+* Python >= 3.10
+* A working installation of Dynawo. 
 
 ## Installation
 
@@ -92,7 +95,7 @@ source venv/bin/activate
 Make sure that `pip` is up-to-date:
 
 ```bash
-(venv) pip install --upgrade pip
+pip install --upgrade pip
 ```
 
 Install the necessary libraries:
@@ -105,16 +108,19 @@ Install the necessary libraries:
 
 The toolbox expects a zip file to be uploaded.
 This zip file must contain: 
-* The input files for Dynawo (job file and associated files) 
-* A file named *measured_data.csv* that contains the P and Q
-values measured by the PMU.
+* The input files for Dynawo (jobs file and associated files) 
+* A file named *reference_data.csv* that contains the P and Q
+values measured by the PMU, or computed by a reference EMT simulation.
+The format of the CSV must be consistent with the template file in `/test_cases`. 
 
 ## Settings
 
 The file `resources/settings.yaml` needs to be updated with the path
-to your dynawo exe file.
+to your dynawo executable.
 
 ## How to use
+
+### Graphical interface
 
 Run the main script:
 
@@ -122,7 +128,7 @@ Run the main script:
 streamlit run sources/main_gui_streamlit.py
 ```
 
-This will open a new tab in your web browser :
+This will open a new tab in your web browser:
  
 <p align="center">
 <img src="resources/toolbox_gui.png">
@@ -131,14 +137,14 @@ This will open a new tab in your web browser :
 From there, upload the zip file.
 
 Then, navigate to the `Run Dynawo Simulation` tab and click
-on the `Run Dynawo Simulation for the base case` button.
+on the `Run Dynawo for all experiences` button.
 
-Once the simulation has been run, the *simulation* and *measured* 
+Once the simulation has been run, the *simulation* and *reference* 
 plots will be available in the `Visualize plots` tab.
 
 If they do not match well, it is advised to run a sensitivity 
 analysis to identify the parameters that are the most likely to 
-be erronous. Go to the `Sensitivity Analysis` tab, select the 
+be erroneous. Go to the `Sensitivity Analysis` tab, select the 
 parameters to consider, then click the `Run Sensitivity Analysis` button.
 A sorted table on the right will highlight the parameters that 
 are most likely to need calibration.
@@ -154,6 +160,17 @@ to calibrate to a small number.**
 Finally, you can use the `Custom Parameter Calibration` tab 
 to manually modify the model parameters and observe
 their effect in the `Visualize Plots` tab.
+
+### Command line
+
+A template script is listed in this repository: `sources/main_cli.py`.
+This script should be adapted for the study.
+ 
+Simply run it with:
+
+```bash
+python3 sources/main_cli.py
+```
 
 ## Getting started
 

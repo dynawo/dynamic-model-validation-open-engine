@@ -17,56 +17,43 @@ import hashlib
 import pandas as pd
 import numpy as np
 import math
-import streamlit as st
+from enum import Enum
 from scipy.fft import fft
 from scipy.stats import pearsonr
 
 
-def get_measured_data(csv_path):
-    measured_data_df = pd.read_csv(csv_path, delimiter=",")
-    measured_data_df.set_index("time", inplace=True)
-    measured_data_df = remove_rows_with_same_index(measured_data_df)
-    col_name_p = [col for col in measured_data_df.columns
-                  if col.endswith("PGenPu")
-                  or col.endswith("PGenNomPu")
-                  or col.endswith("P2_value")][0]
-    col_name_q = [col for col in measured_data_df.columns
-                  if col.endswith("QGenPu")
-                  or col.endswith("QGenNomPu")
-                  or col.endswith("Q2_value")][0]
-    st.session_state["col_name_p"] = col_name_p
-    st.session_state["col_name_q"] = col_name_q
-    measured_data_df[col_name_p] = pd.to_numeric(measured_data_df[col_name_p], errors='coerce')
-    measured_data_df[col_name_q] = pd.to_numeric(measured_data_df[col_name_q], errors='coerce')
-
-    return measured_data_df
+class PowerToCalibrate(Enum):
+    PQ = "PQ"
+    P = "P"
+    Q = "Q"
 
 
-def get_col_name_p_q():
-    col_name_p = st.session_state["col_name_p"] if "col_name_p" in st.session_state else None
-    col_name_q = st.session_state["col_name_q"] if "col_name_q" in st.session_state else None
-    return col_name_p, col_name_q
+def get_reference_data(csv_path: str) -> pd.DataFrame:
+    reference_data_df = pd.read_csv(csv_path, delimiter=",")
+    reference_data_df.set_index("time", inplace=True)
+    reference_data_df = remove_rows_with_same_index(reference_data_df)
+    reference_data_df = reference_data_df.apply(pd.to_numeric, errors='coerce')
+    return reference_data_df
 
 
-def remove_rows_with_same_index(df):
+def remove_rows_with_same_index(df: pd.DataFrame) -> pd.DataFrame:
     return df[~df.index.duplicated(keep='first')]
 
 
-def sample_df(df, start_time=None, end_time=None, sampling_frequency=100):
-    """
-    start_time: measure start time
-    end_time: end_time end time
+def sample_df(
+        df: pd.DataFrame,
+        start_time: float | None = None, end_time: float | None = None,
+        sampling_frequency=100
+) -> pd.DataFrame:
 
-    The indices of the sampled df of simulation data must match with the indices of the measured data.
-    """
     df = df.sort_index()
 
-    if start_time == None:
+    if start_time is None:
         start_time = df.index[0]
     else:
         if start_time < df.index[0]:
             raise ValueError(f"start_time {start_time} is before the minimum index in df ({df.index[0]})")
-    if end_time == None:
+    if end_time is None:
         end_time = df.index[-1]
     else:
         if end_time > df.index[-1]:
@@ -89,7 +76,7 @@ def sample_df(df, start_time=None, end_time=None, sampling_frequency=100):
     return sampled_df
 
 
-def pearson_corr(x, y):
+def pearson_corr(x: np.ndarray, y: np.ndarray) -> float:
     x = np.asarray(x, dtype=np.float64)
     y = np.asarray(y, dtype=np.float64)
     correlation, _ = pearsonr(x, y)
@@ -118,24 +105,27 @@ def similarity_metrics(x, y):
     return m_alpha, a_beta
 
 
-def rmse(measured_p, measured_q, simulated_p, simulated_q):
+def rmse(
+    reference_p: np.ndarray,
+    reference_q: np.ndarray,
+    simulated_p: np.ndarray,
+    simulated_q: np.ndarray,
+    power_to_calibrate: PowerToCalibrate = PowerToCalibrate.PQ,
+) -> float:
     """
-    measured_p, measured_q, simulated_p, simulated_q are numpy Arrays of same length
+    reference_p, reference_q, simulated_p, simulated_q are numpy Arrays of same length
     (i.e. after sampling)
     """
-    errors = np.square(measured_p - simulated_p) + np.square(measured_q - simulated_q)
+    if power_to_calibrate == PowerToCalibrate.P:
+        errors = np.square(reference_p - simulated_p)
+    elif power_to_calibrate == PowerToCalibrate.Q:
+        errors = np.square(reference_q - simulated_q)
+    else:
+        errors = np.square(reference_p - simulated_p) + np.square(reference_q - simulated_q)
+
     mean_error = np.mean(errors)
     rmse = np.sqrt(mean_error)
     return rmse
-
-
-def clean_directory(folder_path):
-    for file_object in os.listdir(folder_path):
-        file_object_path = os.path.join(folder_path, file_object)
-        if os.path.isfile(file_object_path) or os.path.islink(file_object_path):
-            os.unlink(file_object_path)
-        else:
-            shutil.rmtree(file_object_path)
 
 
 def get_file_hash(file):
@@ -144,3 +134,13 @@ def get_file_hash(file):
     file.seek(0)
     return file_hash
 
+
+def clean_directory(folder_path: str) -> None:
+    if not os.path.isdir(folder_path):
+        return
+    for file_object in os.listdir(folder_path):
+        file_object_path = os.path.join(folder_path, file_object)
+        if os.path.isfile(file_object_path) or os.path.islink(file_object_path):
+            os.unlink(file_object_path)
+        else:
+            shutil.rmtree(file_object_path)

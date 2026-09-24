@@ -11,12 +11,11 @@
 
 # ROADMAP
 
-* The sensitivity computation should be revisited in order to deal
-with binary variables, and for float variables to per-unit the epsilon.
 * Adapt the optimization engine in order to deal with binary variables
-* Enable to work with non pu values?
 * Add a button to force the stop of the optimization process if it
 takes too much time.
 * Revisit the call to dynawo, for instance using pypowsybl.
-* take advantage of parallel computing?
-* Enable the possibility to have multi-experience parameter calibration.
+* Take advantage of parallel computing?
+* With streamlit it is near imposible to remove an experience because of the behaviour of the st.file_uploader
+==> Refactor everything using another library than streamlit
+* SonarQube

@@ -17,7 +17,7 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sources")))
 
 from util_functions import (
-    get_measured_data,
+    get_reference_data,
     remove_rows_with_same_index,
     sample_df,
     pearson_corr,
@@ -31,14 +31,16 @@ from util_functions import (
 class TestUtilFunctions(unittest.TestCase):
 
     @patch("util_functions.st")
-    def test_get_measured_data(self, mock_st):
-        csv_path = os.path.join(os.path.dirname(__file__), "..", "test_cases", "test_case_1", "measured_data.csv")
-        measured_data_df = get_measured_data(csv_path)
+    def test_get_reference_data(self, mock_st):
+        csv_path = os.path.join(os.path.dirname(__file__), "..", "test_cases",
+                                "dynawo_branch_3713_add_lvrt_hvrt_models", "test_case_1_H",
+                                "reference_data.csv")
+        reference_data_df = get_reference_data(csv_path)
 
         # Index must be "time"
-        self.assertEqual(measured_data_df.index.name, "time")
+        self.assertEqual(reference_data_df.index.name, "time")
         # No duplicated allowed
-        self.assertFalse(measured_data_df.index.duplicated().any())
+        self.assertFalse(reference_data_df.index.duplicated().any())
 
     def test_remove_rows_with_same_index(self):
         df = pd.DataFrame(
@@ -96,23 +98,23 @@ class TestUtilFunctions(unittest.TestCase):
         self.assertAlmostEqual(a_beta, 1.0, places=6)
 
     def test_rmse_identical_values_is_zero(self):
-        measured_p = np.array([1.0, 2.0])
-        measured_q = np.array([3.0, 4.0])
+        reference_p = np.array([1.0, 2.0])
+        reference_q = np.array([3.0, 4.0])
         simulated_p = np.array([1.0, 2.0])
         simulated_q = np.array([3.0, 4.0])
 
-        rmse_identical_values = rmse(measured_p, measured_q, simulated_p, simulated_q)
+        rmse_identical_values = rmse(reference_p, reference_q, simulated_p, simulated_q)
 
         self.assertEqual(rmse_identical_values, 0.0)
 
     def test_rmse_different_values(self):
-        measured_p = np.array([1.0])
-        measured_q = np.array([1.0])
+        reference_p = np.array([1.0])
+        reference_q = np.array([1.0])
         simulated_p = np.array([2.0])
         simulated_q = np.array([2.0])
 
         # mse = (1^2 + 1^2) = 2 -> rmse = sqrt(2)
-        rmse_different_values = rmse(measured_p, measured_q, simulated_p, simulated_q)
+        rmse_different_values = rmse(reference_p, reference_q, simulated_p, simulated_q)
 
         self.assertAlmostEqual(
             rmse_different_values,
