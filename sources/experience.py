@@ -307,6 +307,8 @@ class Experience:
         clean_directory(self.temp_folder_calibration)
         clean_directory(self.temp_folder_custom_calibration)
 
+        self.file_hash = None
+
         self.jobs_file = None
         self.dyd_file = None
         self.par_file = None

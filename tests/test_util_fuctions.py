@@ -9,11 +9,12 @@
 
 import os
 import unittest
-from unittest.mock import patch
 import tempfile
 import numpy as np
 import pandas as pd
 import sys
+
+# Add the sources directory to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sources")))
 
 from util_functions import (
@@ -24,23 +25,34 @@ from util_functions import (
     similarity_metrics,
     rmse,
     clean_directory,
-    get_file_hash
+    get_file_hash,
 )
 
 
 class TestUtilFunctions(unittest.TestCase):
 
-    @patch("util_functions.st")
-    def test_get_reference_data(self, mock_st):
-        csv_path = os.path.join(os.path.dirname(__file__), "..", "test_cases",
-                                "dynawo_branch_3713_add_lvrt_hvrt_models", "test_case_1_H",
-                                "reference_data.csv")
-        reference_data_df = get_reference_data(csv_path)
+    def test_get_reference_data(self):
+        # Create a temporary CSV file with a time column and duplicated indices
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_path = os.path.join(tmpdir, "reference_data.csv")
+            df = pd.DataFrame(
+                {
+                    "time": [0.0, 0.0, 0.1],
+                    "P": [1.0, 2.0, 3.0],
+                    "Q": [4.0, 5.0, 6.0],
+                }
+            )
+            df.to_csv(csv_path, index=False)
+
+            reference_data_df = get_reference_data(csv_path)
 
         # Index must be "time"
         self.assertEqual(reference_data_df.index.name, "time")
-        # No duplicated allowed
+        # No duplicated indices allowed
         self.assertFalse(reference_data_df.index.duplicated().any())
+        # Values must be numeric
+        self.assertTrue(np.issubdtype(reference_data_df["P"].dtype, np.number))
+        self.assertTrue(np.issubdtype(reference_data_df["Q"].dtype, np.number))
 
     def test_remove_rows_with_same_index(self):
         df = pd.DataFrame(
@@ -54,13 +66,11 @@ class TestUtilFunctions(unittest.TestCase):
         self.assertListEqual(list(result.index), [0.0, 0.1])
         self.assertEqual(result.loc[0.0, "val"], 1)
 
-    # TODO
     def test_sample_df(self):
-        # Initial dataframe with 1 sec timestep
         df = pd.DataFrame(
             {
-                "time": [0.0, 1],
-                "val": [0.0, 5],
+                "time": [0.0, 1.0],
+                "val": [0.0, 5.0],
             }
         ).set_index("time")
 
@@ -68,12 +78,12 @@ class TestUtilFunctions(unittest.TestCase):
         sampled = sample_df(df, sampling_frequency=10)
 
         # Checking indices
-        expected_index = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+        expected_index = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
         self.assertTrue(np.allclose(sampled.index.values, expected_index))
 
         # Checking values
         self.assertEqual(sampled.loc[0.0, "val"], 0.0)
-        self.assertEqual(sampled.loc[1, "val"], 5)
+        self.assertEqual(sampled.loc[1.0, "val"], 5.0)
         self.assertAlmostEqual(sampled.loc[0.3, "val"], 1.5, places=6)
 
     def test_pearson_corr_identical_arrays_is_one(self):
