@@ -7,13 +7,24 @@
 # SPDX-License-Identifier: MPL-2.0
 # This file is part of the dynamic-model-validation-engine project.
 
+
+"""
+This file contains the streamlit code for the plot tab.
+"""
+
+
 import streamlit as st
 import pandas as pd
-
-from experience_set import ExperienceSet
-
 import plotly.graph_objs as go
+from experience_set import ExperienceSet
 from plotly.subplots import make_subplots
+from const import (
+    CORRELATION_LABEL,
+    MAG_METRIC_LABEL,
+    PH_METRIC_LABEL,
+    RMSE_LABEL,
+    EXPERIENCE_SET_ST_SESSION_KEY
+)
 
 
 def create_correlation_df(correlation_dict: dict, index_label: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -31,10 +42,10 @@ def create_correlation_df(correlation_dict: dict, index_label: str) -> tuple[pd.
 
     similarity_p_df = pd.DataFrame(
         {
-            "Correlation": [corr_p],
-            "Mag metric": [m_alpha_p],
-            "Ph metric": [a_beta_p],
-            "RMSE": [rmse_p],
+            CORRELATION_LABEL: [corr_p],
+            MAG_METRIC_LABEL: [m_alpha_p],
+            PH_METRIC_LABEL: [a_beta_p],
+            RMSE_LABEL: [rmse_p],
         },
         index=[index_label],
     )
@@ -42,10 +53,10 @@ def create_correlation_df(correlation_dict: dict, index_label: str) -> tuple[pd.
 
     similarity_q_df = pd.DataFrame(
         {
-            "Correlation": [corr_q],
-            "Mag metric": [m_alpha_q],
-            "Ph metric": [a_beta_q],
-            "RMSE": [rmse_q],
+            CORRELATION_LABEL: [corr_q],
+            MAG_METRIC_LABEL: [m_alpha_q],
+            PH_METRIC_LABEL: [a_beta_q],
+            RMSE_LABEL: [rmse_q],
         },
         index=[index_label],
     )
@@ -53,10 +64,10 @@ def create_correlation_df(correlation_dict: dict, index_label: str) -> tuple[pd.
 
     similarity_pq_df = pd.DataFrame(
         {
-            "Correlation": [(corr_p + corr_q) / 2],
-            "Mag metric": [(m_alpha_p + m_alpha_q) / 2],
-            "Ph metric": [(a_beta_p + a_beta_q) / 2],
-            "RMSE": [rmse_pq],
+            CORRELATION_LABEL: [(corr_p + corr_q) / 2],
+            MAG_METRIC_LABEL: [(m_alpha_p + m_alpha_q) / 2],
+            PH_METRIC_LABEL: [(a_beta_p + a_beta_q) / 2],
+            RMSE_LABEL: [rmse_pq],
         },
         index=[index_label],
     )
@@ -289,6 +300,6 @@ def create_plots(exp_set: ExperienceSet):
 
 
 def create_plot_tab():
-    exp_set: ExperienceSet = st.session_state["experience_set"]
+    exp_set: ExperienceSet = st.session_state[EXPERIENCE_SET_ST_SESSION_KEY]
     create_correlation_panel(exp_set)
     create_plots(exp_set)

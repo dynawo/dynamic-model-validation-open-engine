@@ -11,7 +11,6 @@ import os
 import sys
 import unittest
 
-# Ajout du répertoire sources au path, comme dans les autres tests
 sys.path.insert(
     0,
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sources")),
@@ -47,10 +46,8 @@ class TestDynawoFunctions(unittest.TestCase):
         try:
             simulation_data_df = run_dynawo(dynawo_launcher, example_jobs_file)
         except DynawoFailedException:
-            # On ne fait pas échouer toute la suite si Dynawo n'est pas disponible
             self.skipTest("Dynawo simulation failed for the example case")
 
-        # On vérifie que le DataFrame n'est pas vide après échantillonnage
         sampled_df = sample_df(simulation_data_df)
         self.assertFalse(sampled_df.empty, "Simulation data DataFrame is empty")
 

@@ -7,6 +7,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # This file is part of the dynamic-model-validation-engine project.
 
+
 """
 Main function to run the GUI of the Dynawo Model validation toolbox.
 """
@@ -15,16 +16,18 @@ Main function to run the GUI of the Dynawo Model validation toolbox.
 import os
 import streamlit as st
 from datetime import datetime
-
 from experience_set import ExperienceSet
 from settings import Settings
-
 from tabs.data_tab import create_data_tab
 from tabs.dynawo_tab import create_dynawo_tab
 from tabs.plot_tab import create_plot_tab
 from tabs.sensitivity_tab import create_sensitivity_tab
-from tabs.param_calibration_tab import create_param_calibration_tab
+from tabs.automatic_param_calibration_tab import create_param_calibration_tab
 from tabs.custom_param_calibration_tab import create_custom_calibration_tab
+from const import (
+    EXPERIENCE_SET_ST_SESSION_KEY,
+    DYNAWO_LAUNCHER_ST_SESSION_KEY
+)
 
 
 app_title = "Dynawo Model Validation Tool"
@@ -40,12 +43,12 @@ def init_experience_set():
     base_temp_root = os.path.join(script_directory, "..", "temp")
     os.makedirs(base_temp_root, exist_ok=True)
 
-    if "experience_set" not in st.session_state:
+    if EXPERIENCE_SET_ST_SESSION_KEY not in st.session_state:
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         temp_dir = os.path.join(base_temp_root, run_id)
         os.makedirs(temp_dir, exist_ok=True)
 
-        st.session_state["experience_set"] = ExperienceSet(
+        st.session_state[EXPERIENCE_SET_ST_SESSION_KEY] = ExperienceSet(
             experience_ref=None,
             additional_experiences=[],
             col_name_p=None,
@@ -61,13 +64,14 @@ def main():
     # Initialize Dynawo settings
     dynawo_settings = Settings()
     dynawo_launcher = dynawo_settings.get_dynawo_launcher()
-    st.session_state["dynawo_launcher"] = dynawo_launcher
+    st.session_state[DYNAWO_LAUNCHER_ST_SESSION_KEY] = dynawo_launcher
 
     # Initialize the ExperienceSet
     init_experience_set()
 
     # Creating tabs
-    data_tab, dynawo_tab, plot_tab, sensitivity_tab, param_calibration_tab, custom_param_calibration_tab = st.tabs(
+    data_tab, dynawo_tab, plot_tab, sensitivity_tab, \
+    automatic_param_calibration_tab, custom_param_calibration_tab = st.tabs(
         [
             "Upload Data",
             "Run Dynawo Simulation",
@@ -85,7 +89,7 @@ def main():
         create_plot_tab()
     with sensitivity_tab:
         create_sensitivity_tab()
-    with param_calibration_tab:
+    with automatic_param_calibration_tab:
         create_param_calibration_tab()
     with custom_param_calibration_tab:
         create_custom_calibration_tab()

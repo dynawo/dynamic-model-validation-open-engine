@@ -1,4 +1,3 @@
-# main_cli.py
 # Copyright (c) 2022-2025, RTE (http://www.rte-france.com)
 # See AUTHORS.md
 # All rights reserved.
@@ -8,6 +7,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # This file is part of the dynamic-model-validation-engine project.
 
+
 """
 Main function to run a parameter calibration session without a GUI.
 
@@ -15,7 +15,8 @@ This CLI script:
   - prepares an ExperienceSet with a reference experience loaded,
   - prepares a selection of parameters to calibrate,
   - chooses an optimization method and its parameters,
-  - runs the calibration and logger.infos the calibrated values.
+  - runs the calibration,
+  - dumps calibration info and curves.
 
 This script is a template, and should be adapted for each study.
 """
@@ -26,29 +27,42 @@ import sys
 import json
 import logging
 import pandas as pd
-from datetime import datetime
 import plotly.graph_objs as go
+from datetime import datetime
 from plotly.subplots import make_subplots
-
-from typing import Any, Dict, List
+from typing import Dict, List
 from settings import Settings
-from experience import Experience, ExperienceLoadError
+from experience import (
+    Experience,
+    ExperienceLoadError
+)
 from experience_set import ExperienceSet
 from util_functions import PowerToCalibrate
-from dynawo_functions import run_base_case_for_all, SimulationPreconditionError
+from dynawo_functions import (
+    run_base_case_for_all,
+    SimulationPreconditionError,
+    DynawoParam
+)
 from automatic_calibration import (
     run_parameter_calibration,
     OptimMethod,
+)
+from msg import (
+    MSG_UNEXPECTED_ERROR_BASECASE,
+    MSG_ERR_LOADING_REF_EXP,
+    MSG_ERR_INFERRING_PQ_COLS,
+    MSG_ERR_LOADING_ADD_EXP,
+    MSG_INFO_ADD_EXP_ADDED
 )
 
 
 def main(
         exp_set: ExperienceSet,
-        selected_sets,
-        logger,
+        selected_sets: Dict[str, Dict[str, DynawoParam]],
+        logger: logging.Logger,
         optim_method: OptimMethod,
         power_to_calibrate: PowerToCalibrate,
-        **optim_params,
+        **optim_params
 ) -> None:
 
     # Settings / Dynawo launcher
@@ -69,7 +83,7 @@ def main(
         logger.error(f"Cannot run base case: {e}")
         sys.exit(1)
     except Exception as e:
-        logger.error(f"Unexpected error during base case simulation: {e}")
+        logger.error(MSG_UNEXPECTED_ERROR_BASECASE.format(error=e))
         sys.exit(1)
 
     # Automatic parameter calibration
@@ -102,14 +116,15 @@ def prepare_experience_set(
     logger,
     additional_zipfiles: list[str] | None = None,
 ) -> ExperienceSet:
+
+    # ExperienceSet
     script_directory = os.path.dirname(os.path.abspath(__file__))
     base_temp_root = os.path.join(script_directory, "..", "temp")
     os.makedirs(base_temp_root, exist_ok=True)
-
-    # ExperienceSet
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     temp_dir = os.path.join(base_temp_root, run_id)
     os.makedirs(temp_dir, exist_ok=True)
+
     exp_set = ExperienceSet(
         experience_ref=None,
         additional_experiences=[],
@@ -132,11 +147,12 @@ def prepare_experience_set(
                 logger=logger,
             )
     except ExperienceLoadError as e:
-        logger.error(f"Error while loading reference experience: {e}")
+        logger.error(MSG_ERR_LOADING_REF_EXP.format(error=e))
         sys.exit(1)
     except Exception as e:
-        logger.error(f"Unexpected error while loading reference experience: {e}")
+        logger.error(MSG_ERR_LOADING_REF_EXP.format(error=e))
         sys.exit(1)
+
 
     exp_set.experience_ref = exp_ref
 
@@ -144,7 +160,7 @@ def prepare_experience_set(
     try:
         exp_set.initialize_col_names_from_exp_ref()
     except ValueError as e:
-        logger.error(f"Error while inferring P/Q column names: {e}")
+        logger.error(MSG_ERR_INFERRING_PQ_COLS.format(error=e))
         sys.exit(1)
 
     # Additional experiences
@@ -155,27 +171,26 @@ def prepare_experience_set(
             os.makedirs(temp_dir_exp_add, exist_ok=True)
 
             try:
-                exp_add = Experience(
-                    name=exp_name_add,
-                    temp_dir_exp=temp_dir_exp_add,
-                    weight=1.0,
-                    path_to_zip=zip_path,
-                    logger=logger,
-                )
+                with open(zip_path, "rb") as zip_file:
+                    exp_add = Experience(
+                        name=exp_name_add,
+                        temp_dir_exp=temp_dir_exp_add,
+                        weight=1.0,
+                        zip_file=zip_file,
+                        logger=logger,
+                    )
             except ExperienceLoadError as e:
-                logger.error(f"Error while loading additional experience '{exp_name_add}': {e}")
+                logger.error(MSG_ERR_LOADING_ADD_EXP.format(name=exp_name_add, error=e))
                 continue
             except Exception as e:
-                logger.error(f"Unexpected error while loading additional experience '{exp_name_add}': {e}")
+                logger.error(MSG_ERR_LOADING_ADD_EXP.format(name=exp_name_add, error=e))
                 continue
 
             try:
                 exp_set.add_experience(exp_add)
-                logger.info(
-                    f"Additional experience '{exp_name_add}' has been loaded and added to the ExperienceSet."
-                )
+                logger.info(MSG_INFO_ADD_EXP_ADDED.format(name=exp_name_add))
             except ValueError as e:
-                logger.error(f"Cannot add additional experience '{exp_name_add}': {e}")
+                logger.error(MSG_ERR_LOADING_ADD_EXP.format(name=exp_name_add, error=e))
 
     return exp_set
 
@@ -270,7 +285,7 @@ def dump_correlation_indicators(exp_set: ExperienceSet, output_path: str, logger
     """
     Dump the correlation indicators as a csv file.
     """
-    rows: List[Dict[str, Any]] = []
+    rows: List[Dict[str, object]] = []
 
     def add_row(exp, case_name: str, corr_dict: Dict[str, float]):
         if corr_dict is None:

@@ -7,16 +7,15 @@
 # SPDX-License-Identifier: MPL-2.0
 # This file is part of the dynamic-model-validation-engine project.
 
+
 """
 Description of the Settings class.
 Check resources/settings.yaml for additional information.
 """
 
-import os
+
 import yaml
-
-
-DEFAULT_SETTINGS = os.path.join(os.path.dirname(__file__), "..", "resources", "settings.yaml")
+from const import DEFAULT_SETTINGS
 
 
 class Settings:

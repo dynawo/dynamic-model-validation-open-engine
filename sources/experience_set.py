@@ -7,6 +7,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # This file is part of the dynamic-model-validation-engine project.
 
+
 """
 The ExperienceSet class stores the data related to multiple experiences.
 
@@ -19,9 +20,12 @@ col_name_p, col_name_q, and the associated dyd/par files.
 
 
 import pandas as pd
-from typing import List, Optional, Dict, Any, Tuple
-
-from experience import Experience, ExperienceLoadError
+from typing import List, Optional, Dict, Tuple
+from dynawo_functions import DynawoParam
+from experience import (
+    Experience,
+    ExperienceLoadError
+)
 
 
 class ExperienceSet:
@@ -168,12 +172,70 @@ class ExperienceSet:
     def get_col_names(self) -> Tuple[Optional[str], Optional[str]]:
         return self.col_name_p, self.col_name_q
 
-    def get_parameters_sets(self) -> Dict[str, Dict[str, Any]]:
+    def get_parameters_sets(self) -> Dict[str, Dict[str, DynawoParam]]:
         if self.experience_ref is None:
             raise ValueError(
                 "Cannot get parameters_sets: no reference experience is defined."
             )
         return self.experience_ref.parameters_sets
+
+    def _aggregate_experience_sensitivities(
+        self,
+        aggregated: Dict[str, Dict[str, Dict[str, float]]],
+        exp: Experience,
+    ) -> None:
+        """
+        Met à jour la structure aggregated avec les sensibilités d'une expérience,
+        pondérées par son weight.
+        """
+        weight = exp.get_weight()
+
+        if exp.sensitivities is None:
+            return
+
+        for set_id, sensi_df in exp.sensitivities.items():
+            if sensi_df is None or sensi_df.empty:
+                continue
+
+            if set_id not in aggregated:
+                aggregated[set_id] = {}
+
+            for parameter_id, row in sensi_df.iterrows():
+                sens_value = float(row["sensitivity"])
+
+                if parameter_id not in aggregated[set_id]:
+                    aggregated[set_id][parameter_id] = {
+                        "weighted_sum": 0.0,
+                        "total_weight": 0.0,
+                    }
+
+                aggregated[set_id][parameter_id]["weighted_sum"] += weight * sens_value
+                aggregated[set_id][parameter_id]["total_weight"] += weight
+
+    def _build_weighted_sensitivity_df(
+        self,
+        params_dict: Dict[str, Dict[str, float]],
+    ) -> pd.DataFrame:
+        """
+        Construit un DataFrame des sensibilités pondérées pour un set_id donné,
+        trié par valeur absolue décroissante.
+        """
+        sensi_values: Dict[str, float] = {}
+        for parameter_id, acc in params_dict.items():
+            total_weight = acc["total_weight"]
+            if total_weight > 0.0:
+                sensi_values[parameter_id] = acc["weighted_sum"] / total_weight
+
+        if not sensi_values:
+            return pd.DataFrame(columns=["sensitivity"])
+
+        df = pd.DataFrame.from_dict(
+            sensi_values,
+            orient="index",
+            columns=["sensitivity"],
+        )
+        df = df.reindex(df["sensitivity"].abs().sort_values(ascending=False).index)
+        return df
 
     def compute_weighted_sensitivities(self) -> Dict[str, pd.DataFrame]:
         """
@@ -191,50 +253,11 @@ class ExperienceSet:
         aggregated: Dict[str, Dict[str, Dict[str, float]]] = {}
 
         for exp in self.get_all_experiences():
-            weight = exp.get_weight()
+            self._aggregate_experience_sensitivities(aggregated, exp)
 
-            if exp.sensitivities is None:
-                continue
-
-            for set_id, sensi_df in exp.sensitivities.items():
-                if sensi_df is None or sensi_df.empty:
-                    continue
-
-                if set_id not in aggregated:
-                    aggregated[set_id] = {}
-
-                for parameter_id, row in sensi_df.iterrows():
-                    sens_value = float(row["sensitivity"])
-
-                    if parameter_id not in aggregated[set_id]:
-                        aggregated[set_id][parameter_id] = {
-                            "weighted_sum": 0.0,
-                            "total_weight": 0.0,
-                        }
-
-                    aggregated[set_id][parameter_id]["weighted_sum"] += weight * sens_value
-                    aggregated[set_id][parameter_id]["total_weight"] += weight
-
-        # Conversion of the dict into a sorted Dataframe
         result: Dict[str, pd.DataFrame] = {}
         for set_id, params_dict in aggregated.items():
-            sensi_values: Dict[str, float] = {}
-            for parameter_id, acc in params_dict.items():
-                total_weight = acc["total_weight"]
-                if total_weight > 0.0:
-                    sensi_values[parameter_id] = acc["weighted_sum"] / total_weight
-
-            if not sensi_values:
-                result[set_id] = pd.DataFrame(columns=["sensitivity"])
-                continue
-
-            df = pd.DataFrame.from_dict(
-                sensi_values,
-                orient="index",
-                columns=["sensitivity"],
-            )
-            df = df.reindex(df["sensitivity"].abs().sort_values(ascending=False).index)
-            result[set_id] = df
+            result[set_id] = self._build_weighted_sensitivity_df(params_dict)
 
         return result
 
@@ -246,55 +269,16 @@ class ExperienceSet:
             self.experience_ref.has_dynawo_inputs()
         )
 
-    def can_run_sensitivity(self) -> bool:
+    def _basecase_ref_successfully_computed(self) -> bool:
         if self.experience_ref is None:
             return False
         return self.experience_ref.is_base_case_calculated()
+
+    def can_run_sensitivity(self) -> bool:
+        return self._basecase_ref_successfully_computed()
 
     def can_run_calibration(self) -> bool:
-        if self.experience_ref is None:
-            return False
-        return self.experience_ref.is_base_case_calculated()
+        return self._basecase_ref_successfully_computed()
 
     def can_run_custom_calibration(self) -> bool:
-        if self.experience_ref is None:
-            return False
-        return self.experience_ref.is_base_case_calculated()
-
-    def load_reference_from_zip(
-        self,
-        temp_dir_exp: str,
-        path_to_zip: str,
-        exp_name: Optional[str] = None,
-        logger: Optional[object] = None,
-    ) -> Experience:
-        """
-        Load the reference experience from the zip file.
-        Initialize col_name_p and col_name_q for the ExperienceSet.
-        """
-        if self.experience_ref is None:
-            exp_ref = Experience(
-                name=exp_name or "experience_ref",
-                temp_dir_exp=temp_dir_exp,
-                weight=1.0,
-            )
-            self.experience_ref = exp_ref
-        else:
-            exp_ref = self.experience_ref
-            exp_ref.reset()
-            if exp_name is not None:
-                exp_ref.name = exp_name
-
-        exp_ref.load_from_zip(path_to_zip, logger=logger)
-
-        try:
-            self.initialize_col_names_from_exp_ref()
-        except ValueError as e:
-            raise ExperienceLoadError(str(e)) from e
-
-        if logger is not None:
-            logger.info(f"Reference experience '{exp_ref.name}' loaded successfully.")
-            logger.info(f"Reference P column: '{self.col_name_p}'.")
-            logger.info(f"Reference Q column: '{self.col_name_q}'.")
-
-        return exp_ref
+        return self._basecase_ref_successfully_computed()

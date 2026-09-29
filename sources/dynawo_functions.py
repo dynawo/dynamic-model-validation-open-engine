@@ -1,4 +1,3 @@
-# dynawo_functions.py
 # Copyright (c) 2022-2025, RTE (http://www.rte-france.com)
 # See AUTHORS.md
 # All rights reserved.
@@ -8,19 +7,34 @@
 # SPDX-License-Identifier: MPL-2.0
 # This file is part of the dynamic-model-validation-engine project.
 
+
 """
 This file contains the functions that enables to run dynawo and
 to modify the parameter values of the inputs.
 """
+
 
 import os
 import shutil
 import pandas as pd
 import subprocess
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, Optional
-
+import logging
+from typing import Dict, Optional, TYPE_CHECKING
+if TYPE_CHECKING:
+    from experience import Experience
+    from experience_set import ExperienceSet
 from util_functions import remove_rows_with_same_index
+from const import (
+    DYNAWO_NS,
+    DYNAWO_PAR_XPATH_TEMPLATE
+)
+from msg import (
+    MSG_BASECASE_NOT_READY,
+    MSG_CUSTOM_CALIBRATION_NOT_READY,
+    MSG_NO_PARAMETERS_SELECTED_CUSTOM,
+    MSG_DYNAWO_FAILED
+)
 
 
 class DynawoFailedException(Exception):
@@ -54,9 +68,9 @@ class DynawoParam:
                 # seems unnecessary, but prevents "-0.0" behaviours (not pretty on screen)
                 self._min_bound = 0
                 self._max_bound = 0
-        elif type == "BOOL":  # TODO
-            self._min_bound = None
-            self._max_bound = None
+        # elif type == "BOOL":  # TODO
+        #     self._min_bound = None
+        #     self._max_bound = None
         else:
             self._min_bound = None
             self._max_bound = None
@@ -112,7 +126,7 @@ class DynawoParam:
             self._max_bound = None
 
 
-def run_dynawo(dynawo_launcher: str, jobs_file: str, logger: Optional[Any] = None) -> pd.DataFrame:
+def run_dynawo(dynawo_launcher: str, jobs_file: str, logger: Optional[logging.Logger] = None) -> pd.DataFrame:
     """
     The current version of this function calls dynawo via subprocess.
     In the future it might be rewritten by calling dynawo directly from pypowsybl.
@@ -133,15 +147,13 @@ def run_dynawo(dynawo_launcher: str, jobs_file: str, logger: Optional[Any] = Non
         stdout, stderr = t.communicate()
         return_code = t.returncode
 
-        if logger is not None:
-            if return_code != 0:
-                logger.error("Dynawo simulation failed!")
+        if return_code != 0:
+            if logger is not None:
+                logger.error(MSG_DYNAWO_FAILED)
                 msg = stderr.decode("utf-8")
                 logger.error(msg)
-
-        if return_code != 0:
-            os.chdir(init_wd)
             raise DynawoFailedException
+
     finally:
         os.chdir(init_wd)
 
@@ -152,12 +164,10 @@ def run_dynawo(dynawo_launcher: str, jobs_file: str, logger: Optional[Any] = Non
 def modify_one_param_par_file(par_file, set_id, param_id, new_value):
     tree = ET.parse(par_file)
     root = tree.getroot()
-    namespace = {"ns": "http://www.rte-france.com/dynawo"}
-    for par in root.findall(
-        './/ns:set[@id="{}"]/ns:par[@name="{}"]'.format(set_id, param_id), namespace
-    ):
+    namespace = {"ns": DYNAWO_NS}
+    for par in root.findall(DYNAWO_PAR_XPATH_TEMPLATE.format(set_id, param_id), namespace):
         par.set("value", str(new_value))
-    ET.register_namespace("", "http://www.rte-france.com/dynawo")
+    ET.register_namespace("", DYNAWO_NS)
     modified_content = ET.tostring(root, encoding="unicode")
     with open(par_file, "w") as file:
         file.write(modified_content)
@@ -169,31 +179,33 @@ def modify_multiple_param_par_file(par_file, selected_sets):
     """
     tree = ET.parse(par_file)
     root = tree.getroot()
-    namespace = {"ns": "http://www.rte-france.com/dynawo"}
+    namespace = {"ns": DYNAWO_NS}
     for set_id in selected_sets:
         for parameter_id in selected_sets[set_id]:
             parameter = selected_sets[set_id][parameter_id]
             new_value = parameter.get_value()
-            xpath = './/ns:set[@id="{}"]/ns:par[@name="{}"]'.format(set_id, parameter_id)
+            xpath = DYNAWO_PAR_XPATH_TEMPLATE.format(set_id, parameter_id)
             for par in root.findall(xpath, namespace):
                 par.set("value", str(new_value))
-    ET.register_namespace("", "http://www.rte-france.com/dynawo")
+    ET.register_namespace("", DYNAWO_NS)
     modified_content = ET.tostring(root, encoding="unicode")
     with open(par_file, "w") as file:
         file.write(modified_content)
 
 
 def modify_multiple_param_par_file_for_optim(par_file, x, index_to_param_map):
+    # Time-consuming at the moment, but the xml approach should eventually be replaced
+    # with a pypowsybl implementation
     tree = ET.parse(par_file)
     root = tree.getroot()
-    namespace = {"ns": "http://www.rte-france.com/dynawo"}
+    namespace = {"ns": DYNAWO_NS}
     for i in range(len(index_to_param_map)):
         set_id, param_id = index_to_param_map[i]
         param_value = x[i]
-        xpath = './/ns:set[@id="{}"]/ns:par[@name="{}"]'.format(set_id, param_id)
+        xpath = DYNAWO_PAR_XPATH_TEMPLATE.format(set_id, param_id)
         for par in root.findall(xpath, namespace):
             par.set("value", str(param_value))
-    ET.register_namespace("", "http://www.rte-france.com/dynawo")
+    ET.register_namespace("", DYNAWO_NS)
     modified_content = ET.tostring(root, encoding="unicode")
     with open(par_file, "w") as file:
         file.write(modified_content)
@@ -267,148 +279,162 @@ def read_parameters_sets(par_file):
     return parameters_sets
 
 
+def _run_base_case_for_experience(
+    dynawo_launcher: str,
+    exp: "Experience",
+    col_name_p: str,
+    col_name_q: str,
+    logger: Optional[logging.Logger] = None,
+) -> None:
+    """
+    Run Dynawo base case simulation for a single experience.
+    """
+    ok, msg = exp.check_ready_for_basecase_calculation()
+    if not ok:
+        if logger is not None:
+            logger.warning(f"[{exp.name}] {msg}")
+        exp.base_case_simulation_data_df = None
+        exp.base_case_correlation_dict = None
+        return
+
+    jobs_file = exp.jobs_file
+
+    try:
+        if logger is not None:
+            logger.info(f"[{exp.name}]")
+            logger.info("Starting Dynawo base case simulation")
+
+        base_case_simulation_data_df = run_dynawo(
+            dynawo_launcher, jobs_file, logger
+        )
+
+        exp.base_case_simulation_data_df = base_case_simulation_data_df
+
+        base_case_correlation_dict = exp.compute_correlation_dict(
+            simulation_df=base_case_simulation_data_df,
+            col_name_p=col_name_p,
+            col_name_q=col_name_q,
+        )
+        exp.base_case_correlation_dict = base_case_correlation_dict
+
+        if logger is not None:
+            logger.info("Dynawo base case simulation completed.")
+
+    except DynawoFailedException:
+        if logger is not None:
+            logger.error(MSG_DYNAWO_FAILED)
+        exp.base_case_simulation_data_df = None
+        exp.base_case_correlation_dict = None
+
+
 def run_base_case_for_all(
-    dynawo_launcher: Any,
-    exp_set: Any,
-    logger: Optional[Any] = None,
+    dynawo_launcher: str,
+    exp_set: "ExperienceSet",
+    logger: Optional[logging.Logger] = None,
 ) -> None:
     """
     Run Dynawo on the basecase for every experience in the set.
     """
     if not exp_set.can_run_base_case():
-        raise SimulationPreconditionError(
-            "Cannot run base case: reference experience is not ready "
-            "(missing reference data and/or Dynawo inputs)."
-        )
+        raise SimulationPreconditionError(MSG_BASECASE_NOT_READY)
 
     col_name_p, col_name_q = exp_set.get_col_names()
 
     for exp in exp_set.get_all_experiences():
+        _run_base_case_for_experience(
+            dynawo_launcher,
+            exp,
+            col_name_p,
+            col_name_q,
+            logger,
+        )
 
-        if not exp.has_dynawo_inputs():
-            if logger is not None:
-                logger.warning(
-                    f"[{exp.name}] Dynawo inputs are missing - base case simulation skipped."
-                )
-            exp.base_case_simulation_data_df = None
-            exp.base_case_correlation_dict = None
-            continue
 
-        if not exp.has_reference_values():
-            if logger is not None:
-                logger.warning(
-                    f"[{exp.name}] Reference data are missing - base case simulation skipped."
-                )
-            exp.base_case_simulation_data_df = None
-            exp.base_case_correlation_dict = None
-            continue
+def _run_custom_calibration_for_experience(
+    dynawo_launcher: str,
+    exp: "Experience",
+    selected_sets: Dict[str, Dict[str, DynawoParam]],
+    col_name_p: str,
+    col_name_q: str,
+    logger: Optional[logging.Logger] = None,
+) -> None:
+    """
+    Run custom calibration for a single experience.
+    """
+    ok, msg = exp.check_ready_for_custom_calibration()
+    if not ok:
+        if logger is not None:
+            logger.warning(f"[{exp.name}] {msg}")
+        exp.custom_simulation_data_df = None
+        exp.custom_correlation_dict = None
+        return
 
-        jobs_file = exp.jobs_file
+    if logger is not None:
+        logger.info(f"[{exp.name}]")
+        logger.info("Starting Dynawo custom calibration simulation...")
 
-        try:
-            if logger is not None:
-                logger.info(f"[{exp.name}]")
-                logger.info("Starting Dynawo base case simulation")
+    temp_folder_custom_calibration = exp.temp_folder_custom_calibration
+    for element in os.listdir(exp.temp_folder_base_case):
+        src = os.path.join(exp.temp_folder_base_case, element)
+        if os.path.isfile(src):
+            shutil.copy(src, temp_folder_custom_calibration)
 
-            base_case_simulation_data_df = run_dynawo(
-                dynawo_launcher, jobs_file, logger
-            )
+    jobs_file_calibration = exp.get_custom_calibration_jobs_file()
+    par_file_calibration = exp.get_custom_calibration_par_file()
 
-            exp.base_case_simulation_data_df = base_case_simulation_data_df
+    try:
+        custom_simulation_data_df = run_custom_dynawo(
+            dynawo_launcher,
+            jobs_file_calibration,
+            par_file_calibration,
+            selected_sets,
+            logger=logger,
+        )
 
-            base_case_correlation_dict = exp.compute_correlation_dict(
-                simulation_df=base_case_simulation_data_df,
-                col_name_p=col_name_p,
-                col_name_q=col_name_q,
-            )
-            exp.base_case_correlation_dict = base_case_correlation_dict
+        custom_correlation_dict = exp.compute_correlation_dict(
+            simulation_df=custom_simulation_data_df,
+            col_name_p=col_name_p,
+            col_name_q=col_name_q,
+        )
 
-            if logger is not None:
-                logger.info("Dynawo base case simulation completed.")
+        exp.custom_simulation_data_df = custom_simulation_data_df
+        exp.custom_correlation_dict = custom_correlation_dict
 
-        except DynawoFailedException:
-            if logger is not None:
-                logger.error("Dynawo base case simulation failed.")
-            exp.base_case_simulation_data_df = None
-            exp.base_case_correlation_dict = None
+        if logger is not None:
+            logger.info("Dynawo custom calibration simulation completed.")
+
+    except DynawoFailedException:
+        if logger is not None:
+            logger.error("Dynawo custom calibration simulation failed.")
+        exp.custom_simulation_data_df = None
+        exp.custom_correlation_dict = None
 
 
 def run_custom_calibration_for_all(
-    dynawo_launcher: Any,
-    exp_set: Any,
-    selected_sets: Dict[str, Dict[str, Any]],
-    logger: Optional[Any] = None,
+    dynawo_launcher: str,
+    exp_set: "ExperienceSet",
+    selected_sets: Dict[str, Dict[str, DynawoParam]],
+    logger: Optional[logging.Logger] = None,
 ) -> None:
     """
     Run Dynawo with the custom parameters for every experience in the set.
     """
     if not exp_set.can_run_custom_calibration():
-        raise SimulationPreconditionError(
-            "Cannot run custom calibration: reference base case is not calculated."
-        )
+        raise SimulationPreconditionError(MSG_CUSTOM_CALIBRATION_NOT_READY)
 
     if not selected_sets:
         if logger is not None:
-            logger.warning("No parameters selected for custom calibration.")
+            logger.warning(MSG_NO_PARAMETERS_SELECTED_CUSTOM)
         return
 
     col_name_p, col_name_q = exp_set.get_col_names()
 
     for exp in exp_set.get_all_experiences():
-        if not exp.has_dynawo_inputs():
-            if logger is not None:
-                logger.warning(
-                    f"[{exp.name}] Dynawo inputs are missing - custom calibration skipped."
-                )
-            exp.custom_simulation_data_df = None
-            exp.custom_correlation_dict = None
-            continue
-
-        if not exp.has_reference_values():
-            if logger is not None:
-                logger.warning(
-                    f"[{exp.name}] Reference data are missing - custom calibration skipped."
-                )
-            exp.custom_simulation_data_df = None
-            exp.custom_correlation_dict = None
-            continue
-
-        if logger is not None:
-            logger.info(f"[{exp.name}]")
-            logger.info("Starting Dynawo custom calibration simulation...")
-
-        temp_folder_custom_calibration = exp.temp_folder_custom_calibration
-        for element in os.listdir(exp.temp_folder_base_case):
-            src = os.path.join(exp.temp_folder_base_case, element)
-            if os.path.isfile(src):
-                shutil.copy(src, temp_folder_custom_calibration)
-
-        jobs_file_calibration = exp.get_custom_calibration_jobs_file()
-        par_file_calibration = exp.get_custom_calibration_par_file()
-
-        try:
-            custom_simulation_data_df = run_custom_dynawo(
-                dynawo_launcher,
-                jobs_file_calibration,
-                par_file_calibration,
-                selected_sets,
-                logger=logger,
-            )
-
-            custom_correlation_dict = exp.compute_correlation_dict(
-                simulation_df=custom_simulation_data_df,
-                col_name_p=col_name_p,
-                col_name_q=col_name_q,
-            )
-
-            exp.custom_simulation_data_df = custom_simulation_data_df
-            exp.custom_correlation_dict = custom_correlation_dict
-
-            if logger is not None:
-                logger.info("Dynawo custom calibration simulation completed.")
-
-        except DynawoFailedException:
-            if logger is not None:
-                logger.error("Dynawo custom calibration simulation failed.")
-            exp.custom_simulation_data_df = None
-            exp.custom_correlation_dict = None
+        _run_custom_calibration_for_experience(
+            dynawo_launcher,
+            exp,
+            selected_sets,
+            col_name_p,
+            col_name_q,
+            logger,
+        )

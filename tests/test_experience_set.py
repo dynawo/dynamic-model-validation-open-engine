@@ -12,7 +12,6 @@ import sys
 import unittest
 import pandas as pd
 
-# Add the sources directory to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sources")))
 
 from experience_set import ExperienceSet

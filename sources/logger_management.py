@@ -7,9 +7,11 @@
 # SPDX-License-Identifier: MPL-2.0
 # This file is part of the dynamic-model-validation-engine project.
 
+
 """
 Utility function for the loggers.
 """
+
 
 import logging
 import logging.handlers

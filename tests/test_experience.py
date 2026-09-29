@@ -13,7 +13,6 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-# Add the sources directory to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sources")))
 
 from experience import Experience  # type: ignore
@@ -22,10 +21,8 @@ from experience import Experience  # type: ignore
 class TestExperience(unittest.TestCase):
 
     def setUp(self):
-        # Create a temporary root directory for the experience
         self.temp_dir = tempfile.TemporaryDirectory()
 
-        # Instantiate an Experience; it will create its own subfolders
         self.exp = Experience(
             name="test_experience",
             temp_dir_exp=self.temp_dir.name,
@@ -35,7 +32,6 @@ class TestExperience(unittest.TestCase):
         )
 
     def tearDown(self):
-        # Clean up the TemporaryDirectory
         self.temp_dir.cleanup()
 
     def test_initialization_sets_folders_and_defaults(self):

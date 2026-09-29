@@ -7,6 +7,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # This file is part of the dynamic-model-validation-engine project.
 
+
 """
 This file contains the necessary functions for the sensitivity analysis.
 
@@ -14,15 +15,31 @@ Sensitivity analysis should help identifying the parameters whose modification
 has the greatest impact on RMSE.
 """
 
+
 import os
 import shutil
 import pandas as pd
-from typing import Dict, Union, Any, Optional
-from util_functions import sample_df, rmse, PowerToCalibrate
-from dynawo_functions import run_dynawo, modify_one_param_par_file, DynawoFailedException, SimulationPreconditionError
+import logging
+from typing import Dict, Union, Optional
 from enum import Enum
+from util_functions import (
+    sample_df,
+    rmse,
+    PowerToCalibrate
+)
+from dynawo_functions import (
+    run_dynawo,
+    modify_one_param_par_file,
+    DynawoFailedException,
+    SimulationPreconditionError,
+    DynawoParam
+)
 from experience import Experience
 from experience_set import ExperienceSet
+from msg import (
+    MSG_SENSITIVITY_NOT_READY,
+    MSG_NO_PARAMETERS_SELECTED_SENSITIVITY
+)
 
 
 class SensiMethod(Enum):
@@ -53,40 +70,204 @@ def calculate_modified_value(
 
 
 def compute_rmse_for_current_setup(
-        dynawo_launcher, jobs_file_sensitivity,
-        t_start, t_end,
-        col_name_p, col_name_q,
-        sampled_reference_p, sampled_reference_q,
-        power_to_calibrate
+    dynawo_launcher: str,
+    jobs_file_sensitivity: str,
+    t_start: float,
+    t_end: float,
+    col_name_p: str,
+    col_name_q: str,
+    sampled_reference_p,
+    sampled_reference_q,
+    power_to_calibrate: PowerToCalibrate,
 ) -> float:
     sensitivity_simulation_data_df = run_dynawo(dynawo_launcher, jobs_file_sensitivity)
 
     sampled_sensitivity_simulation_data_df = sample_df(
         sensitivity_simulation_data_df,
         start_time=t_start,
-        end_time=t_end
+        end_time=t_end,
     )
 
     sampled_simulated_sensitivity_p = sampled_sensitivity_simulation_data_df[col_name_p].values
     sampled_simulated_sensitivity_q = sampled_sensitivity_simulation_data_df[col_name_q].values
 
     return rmse(
-        sampled_reference_p, sampled_reference_q,
-        sampled_simulated_sensitivity_p, sampled_simulated_sensitivity_q,
-        power_to_calibrate
+        sampled_reference_p,
+        sampled_reference_q,
+        sampled_simulated_sensitivity_p,
+        sampled_simulated_sensitivity_q,
+        power_to_calibrate,
     )
 
 
+def _compute_base_case_rmse(exp: Experience, power_to_calibrate: PowerToCalibrate) -> Optional[float]:
+    if exp.base_case_correlation_dict is None:
+        return None
+
+    if power_to_calibrate == PowerToCalibrate.P:
+        return exp.base_case_correlation_dict.get("rmse_p")
+    if power_to_calibrate == PowerToCalibrate.Q:
+        return exp.base_case_correlation_dict.get("rmse_q")
+    return exp.base_case_correlation_dict.get("rmse_pq")
+
+
+def _log_invalid_param(
+    logger: Optional[logging.Logger],
+    set_id: str,
+    parameter_id: str,
+    message: str,
+) -> None:
+    if logger is not None:
+        logger.error(f"{set_id}/{parameter_id} {message}")
+
+
+def _compute_modified_param_value(
+    parameter: DynawoParam,
+    set_id: str,
+    parameter_id: str,
+    sensi_method: SensiMethod,
+    sensi_params: Dict[str, Union[int, float]],
+    logger: Optional[logging.Logger],
+) -> Optional[Union[float, bool]]:
+    """
+    Compute the modified parameter value based on the sensitivity method.
+
+    Returns the modified value, or None if the parameter should be skipped.
+    """
+    original_value = parameter.get_original_value()
+    param_type = parameter.get_type()
+
+    if param_type == "DOUBLE":
+        try:
+            original_double = float(original_value)
+        except (TypeError, ValueError):
+            _log_invalid_param(
+                logger,
+                set_id,
+                parameter_id,
+                f"has invalid DOUBLE value '{original_value}' - Skipped",
+            )
+            return None
+
+        return calculate_modified_value(original_double, sensi_method, sensi_params)
+
+    if param_type == "BOOL":
+        original_str = str(original_value).strip().lower()
+        if original_str in ("true", "1"):
+            original_bool = True
+        elif original_str in ("false", "0"):
+            original_bool = False
+        else:
+            _log_invalid_param(
+                logger,
+                set_id,
+                parameter_id,
+                f"has invalid BOOL value '{original_value}' - Skipped",
+            )
+            return None
+
+        return not original_bool
+
+    _log_invalid_param(
+        logger,
+        set_id,
+        parameter_id,
+        "is neither DOUBLE or BOOL - Skipped",
+    )
+    return None
+
+
+def _compute_single_param_sensitivity(
+    dynawo_launcher: str,
+    jobs_file_sensitivity: str,
+    par_file_sensitivity: str,
+    set_id: str,
+    parameter_id: str,
+    parameter: DynawoParam,
+    t_start: float,
+    t_end: float,
+    col_name_p: str,
+    col_name_q: str,
+    sampled_reference_p,
+    sampled_reference_q,
+    power_to_calibrate: PowerToCalibrate,
+    sensi_method: SensiMethod,
+    sensi_params: Dict[str, Union[int, float]],
+    base_case_rmse: Optional[float],
+    logger: Optional[logging.Logger],
+) -> Optional[float]:
+    original_value = parameter.get_original_value()
+
+    modified_param_value = _compute_modified_param_value(
+        parameter,
+        set_id,
+        parameter_id,
+        sensi_method,
+        sensi_params,
+        logger,
+    )
+
+    if modified_param_value is None:
+        return None
+
+    modify_one_param_par_file(par_file_sensitivity, set_id, parameter_id, modified_param_value)
+
+    try:
+        rmse_for_param = compute_rmse_for_current_setup(
+            dynawo_launcher=dynawo_launcher,
+            jobs_file_sensitivity=jobs_file_sensitivity,
+            t_start=t_start,
+            t_end=t_end,
+            col_name_p=col_name_p,
+            col_name_q=col_name_q,
+            sampled_reference_p=sampled_reference_p,
+            sampled_reference_q=sampled_reference_q,
+            power_to_calibrate=power_to_calibrate,
+        )
+        if base_case_rmse is None:
+            return None
+
+        sensitivity_value = round(rmse_for_param - base_case_rmse, 6)
+        if logger is not None:
+            logger.info(f"{set_id}/{parameter_id} - Done")
+        return sensitivity_value
+
+    except DynawoFailedException:
+        if logger is not None:
+            logger.info(f"{set_id}/{parameter_id} - Simulation failed!")
+        return None
+
+    finally:
+        modify_one_param_par_file(par_file_sensitivity, set_id, parameter_id, original_value)
+
+
+def _convert_sensitivities_to_dataframes(
+    sensitivities: Dict[str, Dict[str, float]]
+) -> Dict[str, pd.DataFrame]:
+    result: Dict[str, pd.DataFrame] = {}
+    for set_id, sensitivity_dict in sensitivities.items():
+        sensitivity_df = pd.DataFrame.from_dict(
+            sensitivity_dict,
+            orient="index",
+            columns=["sensitivity"],
+        )
+        sensitivity_df = sensitivity_df.reindex(
+            sensitivity_df["sensitivity"].abs().sort_values(ascending=False).index
+        )
+        result[set_id] = sensitivity_df
+    return result
+
+
 def run_sensitivity_analysis(
-    dynawo_launcher: Any,
+    dynawo_launcher: str,
     exp: Experience,
-    selected_sets: Dict[str, Dict[str, Any]],
+    selected_sets: Dict[str, Dict[str, DynawoParam]],
     sensi_method: SensiMethod,
     power_to_calibrate: PowerToCalibrate,
     col_name_p: str,
     col_name_q: str,
-    logger: Optional[Any] = None,
-    **sensi_params: Any,
+    logger: Optional[logging.Logger] = None,
+    **sensi_params: Union[int, float],
 ) -> Dict[str, pd.DataFrame]:
 
     t_start = exp.get_t_start()
@@ -94,6 +275,7 @@ def run_sensitivity_analysis(
     reference_data_df = exp.reference_data_df
     temp_folder_sensitivity = exp.temp_folder_sensitivity
 
+    # Copy base_case files into the sensitivity folder
     for element in os.listdir(exp.temp_folder_base_case):
         src = os.path.join(exp.temp_folder_base_case, element)
         if os.path.isfile(src):
@@ -105,138 +287,74 @@ def run_sensitivity_analysis(
     sampled_reference_data_df = sample_df(
         reference_data_df,
         start_time=t_start,
-        end_time=t_end
+        end_time=t_end,
     )
     sampled_reference_p = sampled_reference_data_df[col_name_p].values
     sampled_reference_q = sampled_reference_data_df[col_name_q].values
 
-    base_case_rmse = None
-    if exp.base_case_correlation_dict is not None:
-        if power_to_calibrate == PowerToCalibrate.P:
-            base_case_rmse = exp.base_case_correlation_dict.get("rmse_p")
-        elif power_to_calibrate == PowerToCalibrate.Q:
-            base_case_rmse = exp.base_case_correlation_dict.get("rmse_q")
-        else:
-            base_case_rmse = exp.base_case_correlation_dict.get("rmse_pq")
+    base_case_rmse = _compute_base_case_rmse(exp, power_to_calibrate)
 
-    sensitivities = dict()
+    sensitivities_raw: Dict[str, Dict[str, float]] = {}
+
     for set_id, params_in_set in selected_sets.items():
-        sensitivity = dict()
+        sensitivity_for_set: Dict[str, float] = {}
+
         for parameter_id, parameter in params_in_set.items():
-            original_value = parameter.get_original_value()
-            param_type = parameter.get_type()
+            sensitivity_value = _compute_single_param_sensitivity(
+                dynawo_launcher=dynawo_launcher,
+                jobs_file_sensitivity=jobs_file_sensitivity,
+                par_file_sensitivity=par_file_sensitivity,
+                set_id=set_id,
+                parameter_id=parameter_id,
+                parameter=parameter,
+                t_start=t_start,
+                t_end=t_end,
+                col_name_p=col_name_p,
+                col_name_q=col_name_q,
+                sampled_reference_p=sampled_reference_p,
+                sampled_reference_q=sampled_reference_q,
+                power_to_calibrate=power_to_calibrate,
+                sensi_method=sensi_method,
+                sensi_params=sensi_params,
+                base_case_rmse=base_case_rmse,
+                logger=logger,
+            )
 
-            if param_type == "DOUBLE":
-                try:
-                    original_double = float(original_value)
-                except (TypeError, ValueError):
-                    if logger is not None:
-                        logger.error(
-                            f"{set_id}/{parameter_id} has invalid DOUBLE value '{original_value}' - Skipped"
-                        )
-                    continue
+            if sensitivity_value is not None:
+                sensitivity_for_set[parameter_id] = sensitivity_value
 
-                modified_param_value = calculate_modified_value(
-                    original_double, sensi_method, sensi_params
-                )
+        sensitivities_raw[set_id] = sensitivity_for_set
 
-            elif param_type == "BOOL":
-                original_str = str(original_value).strip().lower()
-                if original_str in ("true", "1"):
-                    original_bool = True
-                elif original_str in ("false", "0"):
-                    original_bool = False
-                else:
-                    if logger is not None:
-                        logger.error(
-                            f"{set_id}/{parameter_id} has invalid BOOL value '{original_value}' - Skipped"
-                        )
-                    continue
-
-                modified_param_value = not original_bool
-
-            else:
-                if logger is not None:
-                    logger.error(f"{set_id}/{parameter_id} is neither DOUBLE or BOOL - Skipped")
-                continue
-
-            modify_one_param_par_file(par_file_sensitivity, set_id, parameter_id, modified_param_value)
-
-            try:
-                rmse_for_param = compute_rmse_for_current_setup(
-                    dynawo_launcher, jobs_file_sensitivity,
-                    t_start, t_end,
-                    col_name_p, col_name_q,
-                    sampled_reference_p, sampled_reference_q,
-                    power_to_calibrate
-                )
-                sensitivity[parameter_id] = round(rmse_for_param - base_case_rmse, 6)
-                if logger is not None:
-                    logger.info(f"{set_id}/{parameter_id} - Done")
-
-            except DynawoFailedException:
-                if logger is not None:
-                    logger.info(f"{set_id}/{parameter_id} - Simulation failed!")
-            finally:
-                modify_one_param_par_file(par_file_sensitivity, set_id, parameter_id, original_value)
-
-        sensitivities[set_id] = sensitivity
-
-    for set_id in sensitivities:
-        sensitivity_dict = sensitivities[set_id]
-        sensitivity_df = pd.DataFrame.from_dict(sensitivity_dict, orient='index', columns=['sensitivity'])
-        sensitivity_df = sensitivity_df.reindex(sensitivity_df['sensitivity'].abs().sort_values(ascending=False).index)
-        sensitivities[set_id] = sensitivity_df
-
-    return sensitivities
+    return _convert_sensitivities_to_dataframes(sensitivities_raw)
 
 
 def run_sensitivity_for_all(
-    dynawo_launcher: Any,
+    dynawo_launcher: str,
     exp_set: ExperienceSet,
-    selected_sets: Dict[str, Dict[str, Any]],
+    selected_sets: Dict[str, Dict[str, DynawoParam]],
     sensi_method: SensiMethod,
     power_to_calibrate: PowerToCalibrate,
-    logger: Optional[Any] = None,
-    **sensi_params: Any,
+    logger: Optional[logging.Logger] = None,
+    **sensi_params: Union[int, float]
 ) -> None:
     """
     Run the sensitivity analysis on each experience in the ExperienceSet.
     """
     if not exp_set.can_run_sensitivity():
-        raise SimulationPreconditionError(
-            "Cannot run sensitivity analysis: reference base case is not calculated."
-        )
+        raise SimulationPreconditionError(MSG_SENSITIVITY_NOT_READY)
 
     if not selected_sets:
         if logger is not None:
-            logger.warning("No parameters selected for sensitivity analysis.")
+            logger.warning(MSG_NO_PARAMETERS_SELECTED_SENSITIVITY)
         return
 
     col_name_p, col_name_q = exp_set.get_col_names()
 
     for exp in exp_set.get_all_experiences():
-        if not exp.is_base_case_calculated():
+        ok, msg = exp.check_ready_for_sensitivity()
+        if not ok:
             if logger is not None:
-                logger.warning(
-                    f"[{exp.name}] Base case is not calculated - sensitivity analysis skipped."
-                )
-            exp.sensitivities = None
-            continue
-
-        if not exp.has_dynawo_inputs():
-            if logger is not None:
-                logger.warning(
-                    f"[{exp.name}] Dynawo inputs are missing - sensitivity analysis skipped."
-                )
-            exp.sensitivities = None
-            continue
-
-        if not exp.has_reference_values():
-            if logger is not None:
-                logger.warning(
-                    f"[{exp.name}] Reference data are missing - sensitivity analysis skipped."
-                )
+                logger.warning(f"[{exp.name}] {msg}")
             exp.sensitivities = None
             continue
 
@@ -258,5 +376,4 @@ def run_sensitivity_for_all(
         exp.sensitivities = sensitivities
 
         if logger is not None:
-            logger.info(f"Sensitivity analysis completed.")
-
+            logger.info("Sensitivity analysis completed.")

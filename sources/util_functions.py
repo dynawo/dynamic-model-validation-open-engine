@@ -7,9 +7,11 @@
 # SPDX-License-Identifier: MPL-2.0
 # This file is part of the dynamic-model-validation-engine project.
 
+
 """
 This file contains various methods to work on the data.
 """
+
 
 import os
 import shutil
@@ -41,38 +43,44 @@ def remove_rows_with_same_index(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def sample_df(
-        df: pd.DataFrame,
-        start_time: float | None = None, end_time: float | None = None,
-        sampling_frequency=100
+    df: pd.DataFrame,
+    start_time: float | None = None,
+    end_time: float | None = None,
+    sampling_frequency: int = 100,
 ) -> pd.DataFrame:
+    """
+    Resample a time-indexed DataFrame on a regular time grid and interpolate values.
 
+    The function assumes that the DataFrame index represents time (in seconds) and
+    performs a linear interpolation (via `np.interp`) to obtain values at regularly
+    spaced time instants between `start_time` and `end_time`.
+    """
     df = df.sort_index()
 
     if start_time is None:
-        start_time = df.index[0]
+        start_time = float(df.index[0])
     else:
         if start_time < df.index[0]:
             raise ValueError(f"start_time {start_time} is before the minimum index in df ({df.index[0]})")
     if end_time is None:
-        end_time = df.index[-1]
+        end_time = float(df.index[-1])
     else:
         if end_time > df.index[-1]:
             raise ValueError(f"end_time {end_time} is after the maximum index in df ({df.index[-1]})")
 
-    timestep = 1 / sampling_frequency
-    sampled_time_indices = np.linspace(start_time, end_time, num=int(np.round((end_time - start_time) / timestep)) + 1)
+    timestep = 1.0 / sampling_frequency
+    sampled_time_indices = np.arange(start_time, end_time + timestep/2, timestep)
     sampled_time_indices = np.round(sampled_time_indices, 10)
 
-    sampled_df = pd.DataFrame(index=sampled_time_indices, columns=df.columns)
-    for sampled_time_index in sampled_time_indices:
-        if sampled_time_index in df.index:
-            sampled_df.loc[sampled_time_index] = df.loc[sampled_time_index]
-        else:
-            lower_index = max(df.index[df.index < sampled_time_index])
-            upper_index = min(df.index[df.index > sampled_time_index])
-            position = (sampled_time_index - lower_index) / (upper_index - lower_index)
-            interpolated_row = (1 - position) * df.loc[lower_index] + position * df.loc[upper_index]
-            sampled_df.loc[sampled_time_index] = interpolated_row
+    t_orig = df.index.to_numpy(dtype=float)
+
+    sampled_df = pd.DataFrame(index=sampled_time_indices)
+
+    for col in df.columns:
+        y_orig = df[col].to_numpy(dtype=float)
+        y_sampled = np.interp(sampled_time_indices, t_orig, y_orig)
+        sampled_df[col] = y_sampled
+
     return sampled_df
 
 

@@ -7,6 +7,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # This file is part of the dynamic-model-validation-engine project.
 
+
 """
 The Experience class stores the data related to a Dynawo simulation
 and the reference data that the simulation attempts to reproduce.
@@ -14,13 +15,29 @@ and the reference data that the simulation attempts to reproduce.
 
 
 import os
-from typing import Optional, Dict, List, IO
 import pandas as pd
 import shutil
 import zipfile
-from util_functions import get_reference_data, get_file_hash, sample_df, \
-    rmse, pearson_corr, similarity_metrics, PowerToCalibrate, clean_directory
+from typing import Optional, Dict, List, IO
+from util_functions import (
+    get_reference_data,
+    get_file_hash,
+    sample_df,
+    rmse,
+    pearson_corr,
+    similarity_metrics,
+    PowerToCalibrate,
+    clean_directory
+)
 from dynawo_functions import read_parameters_sets
+from const import (
+    REFERENCE_DATA_FILENAME,
+    CRV_EXT,
+    DYD_EXT,
+    JOBS_EXT,
+    PAR_EXT,
+    REQUIRED_FILES
+)
 
 
 class ExperienceLoadError(Exception):
@@ -130,30 +147,23 @@ class Experience:
         Check that the files extracted from the zip contain the expected inputs
         Check that there are no duplicates
         """
-        required_files = [
-            "reference_data.csv",
-            ".crv",
-            ".dyd",
-            ".jobs",
-            ".par",
-        ]
-        found_files = {key: [] for key in required_files}
+        found_files = {key: [] for key in REQUIRED_FILES}
 
         for f in extracted_files:
             filename = os.path.basename(f)
-            if filename == "reference_data.csv":
-                found_files["reference_data.csv"].append(f)
-            elif filename.endswith(".crv"):
-                found_files[".crv"].append(f)
-            elif filename.endswith(".dyd"):
-                found_files[".dyd"].append(f)
-            elif filename.endswith(".jobs"):
-                found_files[".jobs"].append(f)
-            elif filename.endswith(".par"):
-                found_files[".par"].append(f)
+            if filename == REFERENCE_DATA_FILENAME:
+                found_files[REFERENCE_DATA_FILENAME].append(f)
+            elif filename.endswith(CRV_EXT):
+                found_files[CRV_EXT].append(f)
+            elif filename.endswith(DYD_EXT):
+                found_files[DYD_EXT].append(f)
+            elif filename.endswith(JOBS_EXT):
+                found_files[JOBS_EXT].append(f)
+            elif filename.endswith(PAR_EXT):
+                found_files[PAR_EXT].append(f)
 
         errors = []
-        for key in required_files:
+        for key in REQUIRED_FILES:
             if len(found_files[key]) == 0:
                 errors.append(f"Required file '{key}' missing from ZIP.")
             elif len(found_files[key]) > 1:
@@ -186,7 +196,7 @@ class Experience:
         try:
             uploaded_reference_file = [
                 f for f in extracted_files
-                if os.path.basename(f) == "reference_data.csv"
+                if os.path.basename(f) == REFERENCE_DATA_FILENAME
             ][0]
 
             uploaded_reference_file = os.path.join(self.temp_folder_base_case, uploaded_reference_file)
@@ -200,13 +210,13 @@ class Experience:
 
         # Loading Dynawo data
         try:
-            uploaded_jobs = [f for f in extracted_files if f.endswith(".jobs")][0]
-            uploaded_dyd = [f for f in extracted_files if f.endswith(".dyd")][0]
-            uploaded_par = [f for f in extracted_files if f.endswith(".par")][0]
-            uploaded_crv = [f for f in extracted_files if f.endswith(".crv")][0]
+            uploaded_jobs = [f for f in extracted_files if f.endswith(JOBS_EXT)][0]
+            uploaded_dyd = [f for f in extracted_files if f.endswith(DYD_EXT)][0]
+            uploaded_par = [f for f in extracted_files if f.endswith(PAR_EXT)][0]
+            uploaded_crv = [f for f in extracted_files if f.endswith(CRV_EXT)][0]
         except IndexError as e:
             raise ExperienceLoadError(
-                "Missing one of .jobs, .dyd, .par or .crv files in ZIP."
+                f"Missing one of {JOBS_EXT}, {DYD_EXT}, {PAR_EXT} or {CRV_EXT} files in ZIP."
             ) from e
 
         self.jobs_file = os.path.join(self.temp_folder_base_case, uploaded_jobs)
@@ -350,6 +360,47 @@ class Experience:
 
     def is_custom_case_calculated(self) -> bool:
         return self.custom_simulation_data_df is not None
+
+    def check_ready_for_basecase_calculation(self) -> tuple[bool, str]:
+        if not self.has_dynawo_inputs():
+            return False, "Dynawo inputs are missing - base case simulation skipped."
+        if not self.has_reference_values():
+            return False, "Reference data are missing - base case simulation skipped."
+        return True, ""
+
+    def check_ready_for_sensitivity(self) -> tuple[bool, str]:
+        if not self.is_base_case_calculated():
+            return False, "Base case is not calculated - sensitivity analysis skipped."
+        if not self.has_dynawo_inputs():
+            return False, "Dynawo inputs are missing - sensitivity analysis skipped."
+        if not self.has_reference_values():
+            return False, "Reference data are missing - sensitivity analysis skipped."
+        return True, ""
+
+    def check_ready_for_custom_calibration(self) -> tuple[bool, str]:
+        if not self.is_base_case_calculated():
+            return False, "Base case is not calculated - custom calibration  skipped."
+        if not self.has_dynawo_inputs():
+            return False, "Dynawo inputs are missing - custom calibration skipped."
+        if not self.has_reference_values():
+            return False, "Reference data are missing - custom calibration skipped."
+        return True, ""
+
+    def check_ready_for_automatic_calibration(self) -> tuple[bool, str]:
+        if not self.has_dynawo_inputs():
+            return False, "Dynawo inputs are missing - automatic calibration skipped."
+        if not self.has_reference_values():
+            return False, "Reference data are missing - automatic calibration skipped."
+        # Weight > 0
+        if self.get_weight() <= 0.0:
+            return False, "Weight must be > 0.0 - automatic calibration skipped."
+        # Time window must be defined
+        if self.get_t_start() is None or self.get_t_end() is None:
+            return False, "t_start or t_end is not set - automatic calibration skipped."
+        if self.reference_data_df is None:
+            return False, "Reference data frame is not set - automatic calibration skipped."
+
+        return True, ""
 
     def compute_correlation_dict(
             self,

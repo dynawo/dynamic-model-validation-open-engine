@@ -39,7 +39,6 @@ class TestNomad(unittest.TestCase):
             g_1 = 6 - x_1
             g_2 = -x_2
 
-            # Format attendu : "f g1 g2" encodé en bytes
             raw_blackbox_object = f"{f} {g_1} {g_2}"
             x.setBBO(raw_blackbox_object.encode("UTF-8"))
 
@@ -92,7 +91,6 @@ class TestNomad(unittest.TestCase):
         else:
             raise ValueError("Impossible to retrieve the value of the objective function from the Nomad output.")
 
-            # Vérification des résultats
         self.assertAlmostEqual(x_best[0], 6, places=6)
         self.assertAlmostEqual(x_best[1], 2, places=6)
         self.assertAlmostEqual(x_best[2], 1, places=6)
