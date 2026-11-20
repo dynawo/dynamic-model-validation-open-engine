@@ -29,6 +29,7 @@ from sensitivity_analysis import (
 )
 from logger_management import (
     initialize_streamlit_logger,
+    clear_streamlit_logger,
     get_streamlit_logs
 )
 from tabs.util_functions_streamlit import build_filtered_sets
@@ -162,6 +163,7 @@ def _sensitivity_on_click(
     power_to_calibrate: PowerToCalibrate,
     sensi_params: Dict[str, Union[int, float]],
 ) -> None:
+    clear_streamlit_logger(SENSITIVITY_LOGGER_NAME)
     streamlit_logger_sensitivity = _get_or_create_sensitivity_logger()
 
     if selected_sets:

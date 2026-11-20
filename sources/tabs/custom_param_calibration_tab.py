@@ -18,6 +18,7 @@ import logging
 from st_keyup import st_keyup
 from logger_management import (
     initialize_streamlit_logger,
+    clear_streamlit_logger,
     get_streamlit_logs
 )
 from dynawo_functions import (
@@ -123,6 +124,7 @@ def _custom_calibration_on_click(
     exp_set: ExperienceSet,
     selected_sets: Dict[str, Dict[str, DynawoParam]],
 ) -> None:
+    clear_streamlit_logger(CUSTOM_CALIBRATION_LOGGER_NAME)
     streamlit_logger_custom_calibration = _get_or_create_custom_calibration_logger()
 
     if selected_sets:

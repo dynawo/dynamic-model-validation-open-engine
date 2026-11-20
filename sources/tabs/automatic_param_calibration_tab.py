@@ -27,6 +27,7 @@ from automatic_calibration import (
 )
 from logger_management import (
     initialize_streamlit_logger,
+    clear_streamlit_logger,
     get_streamlit_logs
 )
 from experience_set import ExperienceSet
@@ -225,6 +226,7 @@ def _calibration_on_click(
     power_to_calibrate: PowerToCalibrate,
     optim_params: Dict[str, Union[int, float]]
 ) -> None:
+    clear_streamlit_logger(AUTOMATIC_CALIBRATION_LOGGER_NAME)
     streamlit_logger_calibration = _get_or_create_calibration_logger()
 
     if selected_sets:

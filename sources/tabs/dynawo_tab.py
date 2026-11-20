@@ -17,6 +17,7 @@ import streamlit as st
 import logging
 from logger_management import (
     initialize_streamlit_logger,
+    clear_streamlit_logger,
     get_streamlit_logs
 )
 from experience_set import ExperienceSet
@@ -66,6 +67,7 @@ def create_dynawo_tab():
         return
 
     def on_click():
+        clear_streamlit_logger(BASECASE_LOGGER_NAME)
         streamlit_logger_base_case = _get_or_create_basecase_logger()
 
         try:
